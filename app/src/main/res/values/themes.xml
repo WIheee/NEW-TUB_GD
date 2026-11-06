@@ -1,5 +1,6 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
-  <style name="Base.AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
+<resources>
+  <!-- 纯 Compose 应用：使用系统 Material 主题即可，避免引入 material / appcompat 的大量资源 -->
+  <style name="Base.AppTheme" parent="android:Theme.Material.Light.NoActionBar">
   </style>
 
   <style name="AppTheme" parent="Base.AppTheme" />

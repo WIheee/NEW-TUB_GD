@@ -1,92 +1,129 @@
-# 🚀 TUB_GD - Godot 源码智能整合工具
+# TUB_GD — Godot 源码智能整合工具
 
-**一句话介绍**：TUB_GD 是一个跑在安卓手机上的“AI 外挂”。它能把你的 Godot 游戏项目源码，一键打包成结构极其清晰、对 AI 极其友好的 Markdown 文档。
+把整个 Godot 项目打包成一份结构清晰、对 AI 友好的上下文文档（Markdown / TXT / XML），并附带可直接使用的英文任务提示词。
 
-**解决什么痛点？**：你是不是经常把几十个 `.gd` 脚本和 `.tscn` 场景文件一个个复制粘贴给 ChatGPT / Claude / DeepSeek，结果 AI 还是看不懂上下文？或者为了改几行代码，折腾半天去搞 API 充值？**有了 TUB_GD，你直接把生成的 `.md` 文件丢给免费的网页版 AI（哪怕是手机上的 DeepSeek App），不需要配任何 API，就能让 AI 瞬间读懂你的整个游戏，并直接写出自动修改项目的代码！**
-
----
-
-## ✨ 核心功能：把项目“喂”给 AI
-
-### 1. 📂 双引擎导出模式，满足所有场景
-*   **文件夹扫描（写项目必备）**：选择你的 Godot 项目根目录。工具会自动识别 Godot 版本（如 4.7），过滤掉 `.godot`、缓存、二进制图片等垃圾文件，只提取有用的源码和场景。
-*   **多文件合并（散件神器）**：与项目扫描彻底解耦。如果你想单独把几个不相关的脚本发给 AI 看，直接勾选散文件即可。**完全无视文件大小上限**，选什么合并什么。
-
-### 2. ⚙️ 三档导出深度，看你想给 AI 多少信息
-*   **仅目录树**：只给 AI 看项目的文件夹结构，适合让 AI 帮你出架构建议。
-*   **仅项目配置**：一键精准提取 `project.godot` 和 `.cfg` 核心配置文件，适合排查底层报错。
-*   **完整导出**：目录树 + 所有代码全部一锅端，适合让 AI 进行全局重构。
-
-### 3. 🛡️ 强大的过滤与保护机制
-*   **软/重排除管理**：支持“硬排除”（彻底隐藏不显示）和“软排除”（保留路径但省略内容）。比如把 `png` 设为软排除，AI 知道这里有个图，但不会被乱码占用 Token。
-*   **防 OOM 崩溃与截断**：超大项目合并时自动保护，不会让手机卡死。
-*   **文件体积显示**：直观看到每个文件的大小（KB/MB）。
-
-### 4. 📦 多格式导出，完美适配所有 AI
-*   **Markdown (`.md`)**：最推荐格式！代码高亮完美，AI 最爱读。
-*   **TXT (`.txt`)**：极简纯文本，适合无渲染环境。
-*   **XML (`.xml`)**：自带 `CDATA` 防崩溃转义，带有 `language` 属性，适合极客深度解析。
-
-### 5. 📜 历史记录与快速分享
-*   自动保留最近 20 次导出记录，随时找回。
-*   支持一键复制到剪贴板，或直接调用系统分享面板发给其他 App。
+> 当前版本：**B1**（beta 1）
 
 ---
 
-## 🧠 杀手锏：四档 AI 人话提示词
+## 它解决什么问题
 
-这是 TUB_GD 的灵魂。在“设置”里，你可以选择四种模式，它会自动注入到生成的文件末尾，让 AI 瞬间领悟你的需求：
-
-*   ⚪ **不注入（纯净）**：什么都不加，适合你只想让 AI 帮你看看代码结构。
-*   🟢 **通用开发**：注入基础红线（如 `.uid` 禁手写），适合日常简单问答。
-*   🟡 **进阶开发**：注入高级工程师规范（懂场景树、懂物理层、懂信号解耦），让 AI 像资深 Godot 开发者一样帮你重构。
-*   🔴 **TUB 同款（最强模式）**：**效率翻三倍的核心！** 在进阶的基础上，强制 AI 输出一个带 `pathlib` 的安全 **Python 脚本**。你只需要把这个脚本放到项目根目录双击运行，它就会自动增删改你的项目文件，不用你手动一个一个改！
+把几十个 `.gd`、`.tscn`、`project.godot` 一个个复制给网页版 AI，既慢又容易丢上下文。TUB_GD 扫描项目目录，自动过滤构建产物、依赖和二进制资源，把真正有用的源码整理成一份长文档。配合免费网页版 DeepSeek 等模型，就能让 AI 读懂整个项目并生成可直接运行的修改脚本。
 
 ---
 
-## 💡 强烈推荐：搭配 DeepSeek 食用，效果翻倍！
+## 核心能力
 
-为什么特别推荐 **DeepSeek**？
-1.  **完全免费（网页/App端）**：不需要去搞什么 API Key，直接在手机浏览器或 App 里用。
-2.  **代码理解能力极强**：特别是对 GDScript 和 Python 脚本的理解，甚至不输给 GPT-4o。
-3.  **超大上下文**：完美吞下你用 TUB_GD 合并的几万行 Godot 源码。
+### 双引擎导出
 
-**丝滑工作流**：
-👉 打开 TUB_GD，导出项目（选 **TUB 同款** 提示词）。
-👉 把导出的长文本发给 DeepSeek。
-👉 告诉它：“帮我实现一个新武器系统，请直接按提示词要求写一个 Python 替换脚本”。
-👉 拿到 Python 脚本，放进项目根目录一键运行，收工！
+- **文件夹扫描**：选择项目根目录，自动识别 Godot 版本、过滤缓存与依赖目录
+- **多文件合并**：单独挑选散文件，忽略大小上限，适合零散脚本
+
+### 三档导出深度
+
+- **仅目录树**：只看结构，适合架构建议
+- **仅项目配置**：只提取 `project.godot`、`.cfg` 等核心配置
+- **完整导出**：目录树 + 全部文本源码
+
+### 过滤与保护
+
+- **软排除**：保留路径，省略内容
+- **重排除**：连路径都不显示
+- 内置排除列表覆盖常见生态：
+  - 目录：VCS / IDE、构建产物（`build`、`dist`、`out`、`target`、`obj`）、依赖（`node_modules`、`vendor`、`Pods`、`.venv`）、前端缓存（`.next`、`.turbo`、`.parcel-cache`）、原生与游戏引擎（`CMakeFiles`、`Library`、`Temp`）、IaC（`.terraform`）等
+  - 扩展名：字体、图片、音视频、3D 模型、压缩包、二进制与库、Office 文档、数据库、`.map` / `.log` 噪声文本
+- 文件大小上限与防 OOM 处理
+
+### 性能设计
+
+- **C++ 原生目录遍历**（JNI + NDK），一级子目录多线程并行
+- 文件大小由 C++ 回传，避免 Kotlin 侧重复 `stat`
+- **流式导出**：边生成边写盘，先写 `.part` 再原子改名
+- **实验性零拷贝**：流式模式下直接写入原始 UTF-8 字节，跳过 decode/encode
+- 关闭零拷贝时启用**有界并行读流水线**（窗口 6 文件 / 8MB）
+- 目录树构建 O(n)，排序键预计算
+
+### 输出格式
+
+- **Markdown**：代码高亮，推荐
+- **TXT**：纯文本
+- **XML**：CDATA 转义，带 `language` 属性
+
+### AI 提示词
+
+- 四档：不注入 / 通用开发 / 进阶开发 / TUB 同款
+- 全英文、无 emoji，按 Godot 4.4 / 4.6 / 4.7 注入差异化红线（`.uid`、`unique_id`、Jolt、`is_class`、`RichTextLabel`、`PackedArray`、类型化返回值）
+- TUB 模式强制输出可一键运行的 Python 补丁脚本
+
+### 界面
+
+Material 3 Expressive 风格：底部悬浮 `NavigationBar`、`SegmentedButton`、动态取色（Android 12+）、纯色主题、页面与列表动效。
 
 ---
 
-## 📱 怎么安装和使用？
+## 使用
 
-1.  前往 [Releases](https://github.com/TUB-R/TUB_GD/releases) 页面下载最新版 `.apk`。
-2.  安装后首次启动，**请务必授予「所有文件访问权限」**（这是读取你项目源码的基础）。
-3.  打开软件 -> 选择目录或文件 -> 选好格式和提示词 -> 点击导出。
-4.  复制生成的 `.md` 内容，去 ChatGPT / Claude / **DeepSeek** 对话框里，告诉它你的开发需求。
+1. 安装 APK
+2. 首次启动授予「所有文件访问权限」
+3. 选择项目目录或散文件
+4. 设置格式、深度、提示词
+5. 导出后复制内容或分享文件
 
----
+### 推荐工作流（DeepSeek）
 
-## 🛠️ 开发者构建指南
-
-如果你也是极客，想自己编译或者魔改代码：
-
-*   **语言与框架**：Kotlin 2.1.0 + Jetpack Compose (Material 3)
-*   **构建系统**：AGP 8.13.0
-*   **最低支持**：Android 9 (API 28)
-*   **目标 SDK**：Android 14 (API 34)
-
-自行编译命令：
-    git clone https://github.com/TUB-R/TUB_GD.git
-    cd TUB_GD
-    ./gradlew assembleRelease
+1. 导出项目，提示词选 **TUB 同款**
+2. 把生成的 `.md` 内容发给 DeepSeek
+3. 描述需求，例如「实现一个武器系统，按提示词要求输出 Python 脚本」
+4. 把脚本放到项目根目录运行，一键改项目
 
 ---
 
-## 📄 开源协议
+## 从源码构建
 
-本项目基于 [MIT 协议](LICENSE) 开源。你可以自由地使用、修改、分发甚至商用。欢迎提交 Issue 或 PR，如果它帮到了你，请给个 ⭐️ Star！
+| 项 | 版本 |
+| --- | --- |
+| JDK | 21 |
+| Gradle | 9.0.0 |
+| Android Gradle Plugin | 8.13.0 |
+| Kotlin | 2.3.0 |
+| Compose BOM | 2026.01.01（Material3 1.4.0） |
+| compileSdk / targetSdk / minSdk | 37 / 34 / 28 |
+| Build Tools | 37.0.0 |
+| NDK | 30.0.15729638 |
+| CMake | 4.1.2 |
+
+```bash
+git clone https://github.com/TUB-R/TUB_GD.git
+cd TUB_GD
+./gradlew :app:assembleDebug
+```
+
+> `compileSdk 37` 用于兼容 ACSIDE 注入的 `acslogger.aar`；AGP 8.13 的未测试提示可通过 `android.suppressUnsupportedCompileSdk` 处理。
+
+### 项目结构
+
+```
+app/src/main/kotlin/com/godot/tub/gd/
+├── MainActivity.kt          # 入口与导航
+├── MainViewModel.kt         # 状态、设置、导出
+├── ui/screens/              # 首页 / 合并 / 结果 / 设置
+├── ui/theme/                # M3 Expressive 主题
+└── utils/
+    ├── SourceMergeUtils.kt  # 扫描、过滤、格式化、提示词
+    └── NativeScanner.kt     # JNI 封装
+app/src/main/cpp/            # C++ 多线程遍历
+```
 
 ---
-*Created by TUB-R*
+
+## 文档
+
+- [CHANGELOG.md](CHANGELOG.md)：版本变更
+- [docs/RELEASING.md](docs/RELEASING.md)：发版流程与 Release Notes 模板
+- [docs/releases/B1.md](docs/releases/B1.md)：当前版本发布说明
+
+---
+
+## 开源协议
+
+MIT。可自由使用、修改、分发与商用。

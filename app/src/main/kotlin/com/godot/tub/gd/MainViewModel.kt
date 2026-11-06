@@ -27,14 +27,17 @@ data class AppSettings(
     val softExcludeRules: Set<String> = emptySet(),
     val hardExcludeRules: Set<String> = emptySet(),
     val maxFileSizeKb: Int = 100,
-    val showGlobalFileSize: Boolean = true
+    val showGlobalFileSize: Boolean = true,
+    val streamOutput: Boolean = true,
+    val zeroCopy: Boolean = true
 )
 
 data class ExportResult(
     val fileName: String, val filePath: String, val charCount: Int,
     val tokenCount: Int, val lineCount: Int, val fullText: String,
     val godotVersion: String = "4.x",
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val streamed: Boolean = false
 )
 
 class MainViewModel : ViewModel() {
@@ -80,9 +83,12 @@ class MainViewModel : ViewModel() {
             softExcludeRules = softRules,
             hardExcludeRules = hardRules,
             maxFileSizeKb = prefs.getInt("maxFileSizeKb", 100),
-            showGlobalFileSize = prefs.getBoolean("showGlobalFileSize", true)
+            showGlobalFileSize = prefs.getBoolean("showGlobalFileSize", true),
+            streamOutput = prefs.getBoolean("streamOutput", true),
+            zeroCopy = prefs.getBoolean("zeroCopy", true)
         )
-        loadHistory()
+        // 历史记录放到后台读取，避免启动时主线程解析大 JSON
+        viewModelScope.launch(Dispatchers.IO) { loadHistory() }
     }
 
     fun updateSettings(update: (AppSettings) -> AppSettings) {
@@ -99,6 +105,8 @@ class MainViewModel : ViewModel() {
                 putString("hardExcludeRules", newSettings.hardExcludeRules.joinToString(","))
                 putInt("maxFileSizeKb", newSettings.maxFileSizeKb)
                 putBoolean("showGlobalFileSize", newSettings.showGlobalFileSize)
+                putBoolean("streamOutput", newSettings.streamOutput)
+                putBoolean("zeroCopy", newSettings.zeroCopy)
                 apply()
             }
         }
@@ -109,12 +117,39 @@ class MainViewModel : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val cfg = settings.value
-                val scanResult = SourceMergeUtils.scanDirectory(
-                    context, uri, cfg.format, cfg.exportMode, cfg.promptMode, cfg.softExcludeRules, cfg.hardExcludeRules, cfg.maxFileSizeKb, cfg.showGlobalFileSize
-                )
                 val rootDoc = DocumentFile.fromTreeUri(context, uri)
                 val folderName = rootDoc?.name ?: "Project"
-                saveResult(folderName, scanResult.content, scanResult.godotVersion)
+                if (cfg.streamOutput) {
+                    val outDir = File(cfg.outputPath)
+                    if (!outDir.exists() && !outDir.mkdirs()) {
+                        throw Exception("无法创建输出目录，请检查存储权限")
+                    }
+                    val ext = if (cfg.format == "MARKDOWN") "md" else cfg.format.lowercase()
+                    val outFile = File(outDir, "${folderName}_source.$ext")
+                    val scanResult = SourceMergeUtils.scanDirectoryToFile(
+                        context, uri, cfg.format, cfg.exportMode, cfg.promptMode,
+                        cfg.softExcludeRules, cfg.hardExcludeRules, cfg.maxFileSizeKb, cfg.showGlobalFileSize,
+                        outFile, previewLimit = 50_000, zeroCopy = cfg.zeroCopy
+                    )
+                    val newResult = ExportResult(
+                        fileName = outFile.name,
+                        filePath = outDir.absolutePath,
+                        charCount = scanResult.charCount,
+                        tokenCount = scanResult.charCount / 4,
+                        lineCount = scanResult.lineCount,
+                        fullText = scanResult.content,
+                        godotVersion = scanResult.godotVersion,
+                        streamed = true
+                    )
+                    result.value = newResult
+                    addHistory(newResult)
+                    currentScreen.value = "result"
+                } else {
+                    val scanResult = SourceMergeUtils.scanDirectory(
+                        context, uri, cfg.format, cfg.exportMode, cfg.promptMode, cfg.softExcludeRules, cfg.hardExcludeRules, cfg.maxFileSizeKb, cfg.showGlobalFileSize
+                    )
+                    saveResult(folderName, scanResult.content, scanResult.godotVersion)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 errorMessage.emit("扫描失败: ${e.message ?: "请检查是否授予了文件访问权限"}")
@@ -193,7 +228,7 @@ class MainViewModel : ViewModel() {
                 val newResult = ExportResult(
                     fileName = outFile.name, filePath = outDir.absolutePath,
                     charCount = text.length, tokenCount = text.length / 4,
-                    lineCount = text.lines().size, fullText = text, godotVersion = godotVersion
+                    lineCount = text.count { it == '\n' } + 1, fullText = text, godotVersion = godotVersion
                 )
                 result.value = newResult
                 addHistory(newResult)
@@ -224,6 +259,7 @@ class MainViewModel : ViewModel() {
                     obj.put("fullText", it.fullText)
                     obj.put("godotVersion", it.godotVersion)
                     obj.put("timestamp", it.timestamp)
+                    obj.put("streamed", it.streamed)
                     jsonArray.put(obj)
                 }
                 historyFile.writeText(jsonArray.toString())
@@ -250,7 +286,8 @@ class MainViewModel : ViewModel() {
                     lineCount = obj.getInt("lineCount"),
                     fullText = obj.getString("fullText"),
                     godotVersion = obj.optString("godotVersion", "4.x"),
-                    timestamp = obj.getLong("timestamp")
+                    timestamp = obj.getLong("timestamp"),
+                    streamed = obj.optBoolean("streamed", false)
                 ))
             }
             historyList.value = list

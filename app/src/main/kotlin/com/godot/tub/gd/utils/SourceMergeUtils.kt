@@ -2,19 +2,60 @@ package com.godot.tub.gd.utils
 
 import android.content.Context
 import android.net.Uri
+import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
 import com.godot.tub.gd.SelectedFile
+import java.io.File
+import java.io.ByteArrayOutputStream
+import java.io.FileOutputStream
+import java.io.OutputStream
+import java.io.Writer
+import java.util.ArrayDeque
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 import java.text.SimpleDateFormat
 import java.util.*
 
 object SourceMergeUtils {
-    val DEFAULT_HARD_DIRS = setOf(".git", ".svn", ".idea", ".vscode", ".vs", ".gradle", "node_modules", "__pycache__", "build", "dist", ".godot", ".import")
+    val DEFAULT_HARD_DIRS = setOf(
+        // VCS / IDE / 构建产物
+        ".git", ".svn", ".hg", ".idea", ".vscode", ".vs", ".gradle", ".kotlin", ".cxx",
+        "build", "dist", "out", "target", "obj", "coverage", "tmp", "temp", "logs",
+        // 包管理 / 依赖目录
+        "node_modules", "bower_components", "jspm_packages", "vendor", "Pods", "DerivedData",
+        ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox", ".eggs",
+        // 前端 / 框架缓存
+        ".next", ".nuxt", ".svelte-kit", ".turbo", ".parcel-cache", ".yarn", ".cache", ".sass-cache",
+        // 移动端 / 原生 / 游戏引擎
+        "CMakeFiles", "Library", "Temp", "Logs", ".dart_tool", ".pub-cache",
+        // 云 / 基础设施
+        ".terraform", ".serverless", ".aws-sam",
+        // Godot
+        ".godot", ".import"
+    )
     val DEFAULT_SOFT_EXTS = setOf(
-        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".psd", ".tga", ".exr", ".hdr", ".dds", ".ktx", ".basis", 
-        ".gltf", ".glb", ".obj", ".fbx", ".dae", ".blend", 
-        ".mp3", ".wav", ".ogg", ".mp4", ".ogv", 
-        ".zip", ".tar", ".gz", ".rar", ".7z", ".apk", ".exe", ".dll"
+        // 图片
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".psd", ".tga", ".exr", ".hdr",
+        ".dds", ".ktx", ".ktx2", ".basis", ".bmp", ".tiff", ".tif", ".heic", ".avif",
+        // 字体
+        ".ttf", ".otf", ".woff", ".woff2", ".eot",
+        // 3D / 模型
+        ".gltf", ".glb", ".obj", ".fbx", ".dae", ".blend", ".stl", ".ply", ".usd", ".usdz",
+        // 音频 / 视频
+        ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".opus", ".wem",
+        ".mp4", ".webm", ".mov", ".avi", ".mkv", ".ogv",
+        // 压缩包
+        ".zip", ".tar", ".gz", ".tgz", ".xz", ".bz2", ".rar", ".7z",
+        // 二进制 / 可执行 / 库
+        ".apk", ".aab", ".ipa", ".exe", ".dll", ".so", ".dylib", ".a", ".lib", ".o", ".class",
+        ".jar", ".war", ".dex", ".wasm", ".pdb", ".ilk", ".exp",
+        // 文档 / 数据库
+        ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+        ".sqlite", ".db", ".mdb", ".ldb",
+        // 噪声文本
+        ".map", ".log"
     )
     
     val TEXT_EXTS = setOf(
@@ -26,10 +67,16 @@ object SourceMergeUtils {
 
     data class FileNode(
         val name: String, val isDir: Boolean, val uri: Uri, val size: Long, 
-        val documentFile: DocumentFile? = null, val children: MutableList<FileNode> = mutableListOf()
+        val documentFile: DocumentFile? = null, val children: MutableList<FileNode> = mutableListOf(),
+        val file: File? = null, val sortKey: String = name.lowercase()
     )
 
-    data class ScanResult(val content: String, val godotVersion: String)
+    data class ScanResult(
+        val content: String,
+        val godotVersion: String,
+        val charCount: Int = content.length,
+        val lineCount: Int = 0
+    )
 
     fun formatSize(size: Long): String {
         return if (size < 1024) "$size B"
@@ -41,31 +88,95 @@ object SourceMergeUtils {
         context: Context, treeUri: Uri, outputFormat: String, exportMode: String, promptMode: String, 
         softExcludes: Set<String>, hardExcludes: Set<String>, maxFileSizeKb: Int, showGlobalFileSize: Boolean
     ): ScanResult {
-        val rootDoc = DocumentFile.fromTreeUri(context, treeUri) ?: return ScanResult("无法读取该文件夹", "Unknown")
-        
+        val (rootNode, version) = buildRootNode(context, treeUri, hardExcludes)
+            ?: return ScanResult("Unable to read this folder", "Unknown")
+        val nodes = if (exportMode == "FULL_EXPORT") {
+            collectTextNodes(context, rootNode, softExcludes, maxFileSizeKb)
+        } else {
+            emptyList()
+        }
+        val textSource = if (nodes.isEmpty()) {
+            null
+        } else {
+            TextPipeline(nodes, loader = { node -> readText(context, node) })
+        }
+        val estimated = if (nodes.isEmpty()) {
+            4096
+        } else {
+            nodes.sumOf { it.size }.coerceIn(0L, 4L * 1024 * 1024).toInt() + (1 shl 16)
+        }
+        val sink = StringBuilderSink(estimated) { node -> readText(context, node, textSource) }
+        try {
+            buildOutput(sink, context, rootNode.name, rootNode, outputFormat, exportMode, promptMode, softExcludes, maxFileSizeKb, showGlobalFileSize, version, textSource)
+        } finally {
+            textSource?.close()
+        }
+        return ScanResult(sink.text(), version)
+    }
+
+    /**
+     * 流式导出：边生成边写入 outFile，内存里只保留 previewLimit 个字符的预览。
+     */
+    fun scanDirectoryToFile(
+        context: Context, treeUri: Uri, outputFormat: String, exportMode: String, promptMode: String,
+        softExcludes: Set<String>, hardExcludes: Set<String>, maxFileSizeKb: Int, showGlobalFileSize: Boolean,
+        outFile: File, previewLimit: Int = 200_000, zeroCopy: Boolean = true
+    ): ScanResult {
+        val (rootNode, version) = buildRootNode(context, treeUri, hardExcludes)
+            ?: return ScanResult("Unable to read this folder", "Unknown")
+        outFile.parentFile?.mkdirs()
+
+        // 先写临时文件，成功后改名，避免中途失败留下半个文件
+        val tempFile = File(outFile.parentFile ?: File("."), outFile.name + ".part")
+
+        // 关闭零拷贝时，仍然可以把读取并行化
+        val textSource = if (!zeroCopy && exportMode == "FULL_EXPORT") {
+            val nodes = collectTextNodes(context, rootNode, softExcludes, maxFileSizeKb)
+            if (nodes.isEmpty()) null else TextPipeline(nodes, loader = { node -> readText(context, node) })
+        } else {
+            null
+        }
+
+        val output = FileOutputStream(tempFile)
+        val writer = output.writer(Charsets.UTF_8).buffered(128 * 1024)
+        val sink = StreamingSink(writer, output, previewLimit, zeroCopy) { node -> readText(context, node, textSource) }
+        try {
+            buildOutput(sink, context, rootNode.name, rootNode, outputFormat, exportMode, promptMode, softExcludes, maxFileSizeKb, showGlobalFileSize, version, textSource)
+        } finally {
+            writer.close()
+            textSource?.close()
+        }
+        if (!tempFile.renameTo(outFile)) {
+            tempFile.copyTo(outFile, overwrite = true)
+            tempFile.delete()
+        }
+        val lines = if (sink.chars == 0L) 0 else sink.newlines + 1
+        return ScanResult(sink.previewText(), version, sink.chars.toInt(), lines)
+    }
+
+    private fun buildRootNode(context: Context, treeUri: Uri, hardExcludes: Set<String>): Pair<FileNode, String>? {
+        // 优先 C++ 原生遍历
+        resolveTreeUriToFile(treeUri)?.let { realRoot ->
+            buildNativeRoot(realRoot, hardExcludes)?.let { return it }
+        }
+        return buildSafRoot(context, treeUri, hardExcludes)
+    }
+
+    private fun buildSafRoot(context: Context, treeUri: Uri, hardExcludes: Set<String>): Pair<FileNode, String>? {
+        val rootDoc = DocumentFile.fromTreeUri(context, treeUri) ?: return null
+
         var detectedVersion = "Unknown"
         val projectFile = rootDoc.findFile("project.godot")
         if (projectFile != null && projectFile.isFile) {
             try {
                 val text = context.contentResolver.openInputStream(projectFile.uri)?.bufferedReader()?.use { it.readText() } ?: ""
-                val regexFeatures = Regex("""config/features\s*=\s*PackedStringArray\("([^"]+)"""")
-                val match = regexFeatures.find(text)
-                if (match != null) {
-                    val rawVer = match.groupValues[1]
-                    val parts = rawVer.split(".")
-                    if (parts.size >= 2) {
-                        detectedVersion = "${parts[0]}.${parts[1]}"
-                    } else {
-                        detectedVersion = rawVer
-                    }
-                } else if (text.contains("config_version=5")) {
-                    detectedVersion = "4.x"
-                }
-            } catch (e: Exception) {}
+                detectedVersion = detectVersionFromText(text)
+            } catch (_: Exception) {
+            }
         }
 
         val rootNode = FileNode(rootDoc.name ?: "Project", true, rootDoc.uri, 0, rootDoc)
-        
+
         fun parseDir(doc: DocumentFile, node: FileNode) {
             doc.listFiles().forEach { child ->
                 if (child.isDirectory) {
@@ -87,9 +198,7 @@ object SourceMergeUtils {
             }
         }
         parseDir(rootDoc, rootNode)
-
-        val content = buildOutput(context, rootNode.name, rootNode, outputFormat, exportMode, promptMode, softExcludes, maxFileSizeKb, showGlobalFileSize, detectedVersion)
-        return ScanResult(content, detectedVersion)
+        return rootNode to detectedVersion
     }
 
     fun processMultipleFiles(
@@ -126,13 +235,13 @@ object SourceMergeUtils {
                     sb.append("    <file path=\"$pathStr\"$langAttr$sizeAttr>\n")
                     
                     if (isSoftFiltered) {
-                        sb.append("      <![CDATA[\n[内容已省略：命中软排除规则]\n]]>\n")
+                        sb.append("      <![CDATA[\n[Content omitted: soft-exclusion rule]\n]]>\n")
                     } else if (isTextFile(context, name, size, uri)) {
                         val rawText = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
                         val text = rawText.replace("]]>", "]]]]><![CDATA[>")
                         sb.append("      <![CDATA[\n$text\n]]>\n")
                     } else {
-                        sb.append("      <![CDATA[\n[二进制资源已省略]\n]]>\n")
+                        sb.append("      <![CDATA[\n[Binary resource omitted]\n]]>\n")
                     }
                     sb.append("    </file>\n")
                 }
@@ -142,8 +251,8 @@ object SourceMergeUtils {
         }
 
         val isMd = (outputFormat == "MARKDOWN")
-        if (isMd) sb.append("# 多文件合并\n\n> 文件数: ${files.size} | 生成时间: $date\n\n")
-        else sb.append("多文件合并\n文件数: ${files.size} | 生成时间: $date\n\n")
+        if (isMd) sb.append("# Multi-file Merge\n\n> Files: ${files.size} | Generated: $date\n\n")
+        else sb.append("Multi-file Merge\nFiles: ${files.size} | Generated: $date\n\n")
         
         files.forEachIndexed { index, file ->
             val uri = file.uri
@@ -167,13 +276,13 @@ object SourceMergeUtils {
                 else sb.append("\n==================================================\n[${index + 1}/${files.size}] $pathStr$sizeStr\n==================================================\n\n")
                 
                 if (isSoftFiltered) {
-                    sb.append("> **[内容已省略]** 命中软排除规则过滤。\n\n")
+                    sb.append("> **[Content omitted]** Excluded by a soft-exclusion rule.\n\n")
                 } else if (isTextFile(context, name, size, uri)) {
                     val text = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: ""
                     if (isMd) sb.append("```${getLang(ext)}\n").append(text).append("\n```\n\n")
                     else sb.append(text).append("\n\n")
                 } else {
-                    sb.append("> **[内容已省略]** 二进制资源，文件大小: ${formatSize(size)}\n\n")
+                    sb.append("> **[Content omitted]** Binary resource (size: ${formatSize(size)}).\n\n")
                 }
             }
         }
@@ -209,11 +318,11 @@ object SourceMergeUtils {
     }
 
     private fun buildOutput(
+        sb: ContentSink,
         context: Context, projectName: String, rootNode: FileNode, 
         outputFormat: String, exportMode: String, promptMode: String, softExcludes: Set<String>, maxFileSizeKb: Int, showGlobalFileSize: Boolean,
-        godotVersion: String
-    ): String {
-        val sb = StringBuilder()
+        godotVersion: String, textSource: TextSource? = null
+    ) {
         val date = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
         
         if (exportMode == "PROJECT_CONFIG") {
@@ -229,20 +338,20 @@ object SourceMergeUtils {
                             val lang = getLang(ext)
                             val langAttr = if (lang.isNotEmpty()) " language=\"$lang\"" else ""
                             try {
-                                val rawText = context.contentResolver.openInputStream(node.uri)?.bufferedReader()?.use { it.readText() } ?: ""
+                                val rawText = readText(context, node, textSource)
                                 val text = rawText.replace("]]>", "]]]]><![CDATA[>")
                                 sb.append("    <file path=\"$relPath\"$langAttr$sizeAttr>\n      <![CDATA[\n$text\n]]>\n    </file>\n")
                             } catch (e: Exception) {}
                         }
                     } else {
                         val newPath = if (path.isEmpty()) node.name else "$path/${node.name}"
-                        node.children.sortedBy { it.name.lowercase() }.forEach { extractConfigs(it, newPath) }
+                        node.children.sortedBy { it.sortKey }.forEach { extractConfigs(it, newPath) }
                     }
                 }
-                rootNode.children.sortedBy { it.name.lowercase() }.forEach { extractConfigs(it, "") }
+                rootNode.children.sortedBy { it.sortKey }.forEach { extractConfigs(it, "") }
                 sb.append("  </files>\n</project>")
             } else {
-                sb.append("# 项目配置 (核心设置文件)\n\n> 生成时间: $date\n\n")
+                sb.append("# Project Configuration (core settings)\n\n> Generated: $date\n\n")
                 fun extractConfigs(node: FileNode, path: String) {
                     if (!node.isDir) {
                         val ext = node.name.substringAfterLast(".").lowercase()
@@ -250,25 +359,27 @@ object SourceMergeUtils {
                             val relPath = if (path.isEmpty()) node.name else "$path/${node.name}"
                             val sizeStr = if (showGlobalFileSize) " (${formatSize(node.size)})" else ""
                             try {
-                                val text = context.contentResolver.openInputStream(node.uri)?.bufferedReader()?.use { it.readText() } ?: ""
+                                val text = readText(context, node, textSource)
                                 sb.append("### $relPath$sizeStr\n\n```ini\n$text\n```\n\n")
                             } catch (e: Exception) {}
                         }
                     } else {
                         val newPath = if (path.isEmpty()) node.name else "$path/${node.name}"
-                        node.children.sortedBy { it.name.lowercase() }.forEach { extractConfigs(it, newPath) }
+                        node.children.sortedBy { it.sortKey }.forEach { extractConfigs(it, newPath) }
                     }
                 }
-                rootNode.children.sortedBy { it.name.lowercase() }.forEach { extractConfigs(it, "") }
+                rootNode.children.sortedBy { it.sortKey }.forEach { extractConfigs(it, "") }
             }
-            return sb.toString()
+            return
         }
 
         if (outputFormat == "XML") {
             sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project name=\"$projectName\" godot_version=\"$godotVersion\" generated=\"$date\">\n")
             
             sb.append("  <structure>\n    <![CDATA[\n")
-            sb.append(buildTree(rootNode, showGlobalFileSize = showGlobalFileSize).lines().joinToString("\n") { "    $it" })
+            buildTree(rootNode, showGlobalFileSize = showGlobalFileSize).lineSequence().forEach { line ->
+                sb.append("    ").append(line).append('\n')
+            }
             sb.append("\n    ]]>\n  </structure>\n")
             
             if (exportMode == "FULL_EXPORT") {
@@ -284,27 +395,27 @@ object SourceMergeUtils {
                         val langAttr = if (lang.isNotEmpty()) " language=\"$lang\"" else ""
                         sb.append("    <file path=\"$relPath\"$langAttr$sizeAttr>\n")
                         if (isSoftFiltered) {
-                            sb.append("      <![CDATA[\n[内容已省略：命中软排除规则]\n]]>\n")
+                            sb.append("      <![CDATA[\n[Content omitted: soft-exclusion rule]\n]]>\n")
                         } else if (node.size > maxFileSizeKb * 1024L) {
-                            sb.append("      <![CDATA[\n[内容已省略：文件超限]\n]]>\n")
+                            sb.append("      <![CDATA[\n[Content omitted: file exceeds size limit]\n]]>\n")
                         } else if (isTextFile(context, node)) {
                             try {
-                                val rawText = context.contentResolver.openInputStream(node.uri)?.bufferedReader()?.use { it.readText() } ?: ""
+                                val rawText = readText(context, node, textSource)
                                 val text = rawText.replace("]]>", "]]]]><![CDATA[>")
                                 sb.append("      <![CDATA[\n$text\n]]>\n")
                             } catch (e: Exception) {
-                                sb.append("      <![CDATA[\n无法读取\n]]>\n")
+                                sb.append("      <![CDATA[\nUnable to read\n]]>\n")
                             }
                         } else {
-                            sb.append("      <![CDATA[\n[二进制资源已省略]\n]]>\n")
+                            sb.append("      <![CDATA[\n[Binary resource omitted]\n]]>\n")
                         }
                         sb.append("    </file>\n")
                     } else {
                         val newPath = if (path.isEmpty()) node.name else "$path/${node.name}"
-                        node.children.sortedBy { it.name.lowercase() }.forEach { extractXml(it, newPath) }
+                        node.children.sortedBy { it.sortKey }.forEach { extractXml(it, newPath) }
                     }
                 }
-                rootNode.children.sortedBy { it.name.lowercase() }.forEach { extractXml(it, "") }
+                rootNode.children.sortedBy { it.sortKey }.forEach { extractXml(it, "") }
                 sb.append("  </files>\n")
             }
             
@@ -312,29 +423,29 @@ object SourceMergeUtils {
                 sb.append("  <prompt>\n    <![CDATA[\n").append(buildPrompt(promptMode, godotVersion)).append("\n]]>\n  </prompt>\n")
             }
             sb.append("</project>")
-            return sb.toString()
+            return
         }
 
         val isMd = (outputFormat == "MARKDOWN")
         if (isMd) {
-            sb.append("# 项目: $projectName\n\n")
-            sb.append("> 生成时间: $date\n\n")
-            if (exportMode == "DIR_ONLY") sb.append("*本文档仅包含项目的目录结构。*\n\n") else sb.append("*本文档包含目录结构与文件内容。*\n\n")
+            sb.append("# Project: $projectName\n\n")
+            sb.append("> Generated: $date\n\n")
+            if (exportMode == "DIR_ONLY") sb.append("*This document contains the project directory structure only.*\n\n") else sb.append("*This document contains the directory structure and file contents.*\n\n")
         } else {
-            sb.append("项目: $projectName\n")
-            sb.append("生成时间: $date\n\n")
+            sb.append("Project: $projectName\n")
+            sb.append("Generated: $date\n\n")
         }
 
         if (exportMode == "DIR_ONLY" || exportMode == "FULL_EXPORT") {
-            if (isMd) sb.append("## 目录结构\n\n```\n")
-            else sb.append("--- 目录结构 ---\n\n")
+            if (isMd) sb.append("## Directory Structure\n\n```\n")
+            else sb.append("--- Directory Structure ---\n\n")
             sb.append(buildTree(rootNode, showGlobalFileSize = showGlobalFileSize))
             if (isMd) sb.append("\n```\n\n") else sb.append("\n\n")
         }
 
         if (exportMode == "FULL_EXPORT") {
-            if (isMd) sb.append("## 文件内容\n\n")
-            else sb.append("--- 文件内容 ---\n\n")
+            if (isMd) sb.append("## File Contents\n\n")
+            else sb.append("--- File Contents ---\n\n")
             
             var fileIndex = 0
             val totalFiles = countFiles(rootNode)
@@ -351,26 +462,26 @@ object SourceMergeUtils {
                     else sb.append("[$fileIndex/$totalFiles] $projectName/$relPath$sizeStr\n\n")
                     
                     if (isSoftFiltered) {
-                        sb.append("> **[内容已省略]** 此处存在软排除规则过滤。\n\n")
+                        sb.append("> **[Content omitted]** Excluded by a soft-exclusion rule.\n\n")
                     } else if (node.size > maxFileSizeKb * 1024L) {
-                        sb.append("> **[内容超限已忽略]** 文件大小 ${formatSize(node.size)}，超过设定上限 ${maxFileSizeKb} KB。\n\n")
+                        sb.append("> **[Content omitted]** File size ${formatSize(node.size)} exceeds the ${maxFileSizeKb} KB limit.\n\n")
                     } else if (isTextFile(context, node)) {
                         try {
-                            val text = context.contentResolver.openInputStream(node.uri)?.bufferedReader()?.use { it.readText() } ?: ""
-                            if (isMd) sb.append("```${getLang(ext)}\n").append(text).append("\n```\n\n")
-                            else sb.append(text).append("\n\n")
+                            if (isMd) sb.append("```").append(getLang(ext)).append('\n')
+                            sb.appendFileContent(node)
+                            if (isMd) sb.append("\n```\n\n") else sb.append("\n\n")
                         } catch (e: Exception) {
-                            sb.append("> 无法读取内容\n\n")
+                            sb.append("> Unable to read content.\n\n")
                         }
                     } else {
-                        sb.append("> **[内容已省略]** 此处存在二进制资源文件。\n\n")
+                        sb.append("> **[Content omitted]** Binary resource.\n\n")
                     }
                 } else {
                     val newPath = if (path.isEmpty()) node.name else "$path/${node.name}"
-                    node.children.sortedBy { it.name.lowercase() }.forEach { extractContent(it, newPath) }
+                    node.children.sortedBy { it.sortKey }.forEach { extractContent(it, newPath) }
                 }
             }
-            rootNode.children.sortedBy { it.name.lowercase() }.forEach { extractContent(it, "") }
+            rootNode.children.sortedBy { it.sortKey }.forEach { extractContent(it, "") }
         }
 
         if (exportMode == "FULL_EXPORT" && promptMode != "NONE") {
@@ -378,11 +489,29 @@ object SourceMergeUtils {
             if (isMd) sb.append(prompt)
             else sb.append(prompt.replace("##", "").replace("**", ""))
         }
-        return sb.toString()
     }
 
     private fun isTextFile(context: Context, node: FileNode): Boolean {
-        return isTextFile(context, node.name, node.size, node.uri)
+        val ext = node.name.substringAfterLast(".").lowercase()
+        val lowerName = node.name.lowercase()
+        if (TEXT_EXTS.contains(ext)) return true
+        if (lowerName == ".gitignore" || lowerName == ".editorconfig" || lowerName == ".gitattributes" || lowerName == ".nomedia") return true
+
+        if (node.size in 1..102400) {
+            try {
+                val stream = node.file?.inputStream() ?: context.contentResolver.openInputStream(node.uri) ?: return false
+                stream.use { input ->
+                    val buffer = ByteArray(1024)
+                    val read = input.read(buffer)
+                    for (i in 0 until read) {
+                        if (buffer[i] == 0.toByte()) return false
+                    }
+                    return true
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return false
     }
 
     private fun isTextFile(context: Context, fileName: String, size: Long, uri: Uri): Boolean {
@@ -408,23 +537,28 @@ object SourceMergeUtils {
 
     private fun buildTree(node: FileNode, prefix: String = "", showGlobalFileSize: Boolean = false): String {
         val sb = StringBuilder()
-        if (prefix.isEmpty()) sb.append("└── 📁 ${node.name}\n")
-        val children = node.children.sortedWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
+        appendTree(sb, node, prefix, showGlobalFileSize)
+        return sb.toString()
+    }
+
+    // 递归写入同一个 StringBuilder，避免每个节点创建临时 String
+    private fun appendTree(sb: StringBuilder, node: FileNode, prefix: String, showGlobalFileSize: Boolean) {
+        if (prefix.isEmpty()) sb.append("└── ").append(node.name).append("/\n")
+        val children = node.children.sortedWith(compareBy({ !it.isDir }, { it.sortKey }))
         children.forEachIndexed { i, child ->
             val isLast = i == children.size - 1
             val conn = if (isLast) "└── " else "├── "
-            val icon = if (child.isDir) "📁" else "📄"
             val actualPrefix = if (prefix.isEmpty()) "    " else prefix
-            
+
             val sizeStr = if (showGlobalFileSize && !child.isDir) " (${formatSize(child.size)})" else ""
-            sb.append("$actualPrefix$conn$icon ${child.name}$sizeStr\n")
-            
+            val displayName = if (child.isDir) child.name + "/" else child.name
+            sb.append(actualPrefix).append(conn).append(displayName).append(sizeStr).append('\n')
+
             if (child.isDir) {
                 val nextPrefix = actualPrefix + if (isLast) "    " else "│   "
-                sb.append(buildTree(child, nextPrefix, showGlobalFileSize))
+                appendTree(sb, child, nextPrefix, showGlobalFileSize)
             }
         }
-        return sb.toString()
     }
 
     private fun countFiles(node: FileNode): Int {
@@ -489,62 +623,374 @@ object SourceMergeUtils {
 
     private fun buildPrompt(mode: String, version: String): String {
         if (mode == "NONE") return ""
-        
+
         val v = version.toFloatOrNull() ?: 4.0f
         val sb = StringBuilder()
-        
-        sb.append("---\n## 🎮 AI 创作提示（工具自动注入）\n\n")
-        sb.append("### 身份与背景\n")
-        sb.append("你是一个资深的 Godot $version 游戏开发者。当前上下文包含了一个完整的 Godot $version 游戏项目源码。\n\n")
-        
-        // 通用规则：所有模式都会携带
-        sb.append("### Godot $version 技术红线\n")
-        sb.append("- 跨文件引用资源请使用 `res://` 路径，严禁使用绝对路径。\n")
-        sb.append("- 请严格使用 GDScript 和 Godot 4.x 的 API。\n")
-        sb.append("- 严禁使用 Godot 3 的旧版 API（如 `KinematicBody`、`instance()` 等）。\n")
+
+        sb.append("---\n## AI Task Instructions (automatically injected)\n\n")
+        sb.append("### Role\n")
+        sb.append("You are a senior Godot $version engineer. The context above contains the source code of a Godot $version project.\n\n")
+
+        sb.append("### Hard Rules\n")
+        sb.append("- Reference resources across files with `res://` paths. Never use absolute paths.\n")
+        sb.append("- Use GDScript and Godot 4.x APIs only.\n")
+        sb.append("- Do not use Godot 3 APIs (for example `KinematicBody` or `instance()`).\n")
         if (v >= 4.4f) {
-            sb.append("- **.uid 文件**：由编辑器自动生成，请勿手写或修改。\n")
+            sb.append("- `.uid` files are generated by the editor. Do not create or modify them.\n")
         }
         if (v >= 4.6f) {
-            sb.append("- **unique_id**：`.tscn` 中的节点唯一标识由编辑器维护，请勿手写。\n")
-            sb.append("- **物理引擎**：默认使用 Jolt Physics，请勿在代码里无端修改物理服务器设置。\n")
+            sb.append("- `unique_id` values in `.tscn` files are maintained by the editor. Do not write them.\n")
+            sb.append("- The default physics engine is Jolt Physics. Do not change physics server settings without a reason.\n")
         }
         if (v >= 4.7f) {
-            sb.append("- **is_class 参数**：参数类型为 StringName，请使用 &\"ClassName\" 语法。\n")
-            sb.append("- **RichTextLabel.add_image**：参数变更为 width_unit / height_unit。\n")
-            sb.append("- **PackedArray 赋值**：直接设置不触发 setter，请使用 .set(i, x)。\n")
-            sb.append("- **类型化返回值**：重写方法时（如 `_process`）必须显式写出 return 语句。\n")
+            sb.append("- `is_class` parameters are `StringName`. Use the `&\"ClassName\"` syntax.\n")
+            sb.append("- `RichTextLabel.add_image` takes `width_unit` and `height_unit`.\n")
+            sb.append("- Assigning to a `PackedArray` directly does not trigger setters. Use `.set(i, value)`.\n")
+            sb.append("- Overridden methods such as `_process` must contain an explicit `return` statement.\n")
         }
         sb.append("\n")
 
-        // 进阶模式：加入 3D 场景理解和开发规范
         if (mode == "ADVANCED" || mode == "TUB_STYLE") {
-            sb.append("### 进阶开发指南（必读）\n")
-            sb.append("1. **场景理解**：请仔细阅读上下文中的 `.tscn` 文件，理解节点树（Node Tree）结构。明确各个节点（Camera3D, CharacterBody3D, Marker3D, UI 等）的层级和父子关系。\n")
-            sb.append("2. **物理与碰撞**：代码中涉及 `PhysicsRayQueryParameters3D` 时，请检查节点的 `collision_layer` 和 `collision_mask`，确保射线能正确命中目标。\n")
-            sb.append("3. **资源预加载**：对于确定一定会用到的资源（如特效场景、常用音频），请优先使用 `preload()`；对于动态加载的，使用 `load()`。\n")
-            sb.append("4. **UI 与 3D 空间**：所有 CanvasLayer 下的 UI 节点，其坐标独立于 3D 世界。处理屏幕中心准星时，请使用 `get_viewport().get_visible_rect().size / 2`。\n")
-            sb.append("5. **面向对象设计**：善用 `signal`（信号）解耦节点，避免硬编码强引用（如 `get_node(\"../../Player\")`），推荐使用分组 `get_tree().get_nodes_in_group(\"player_team\")`。\n\n")
+            sb.append("### Engineering Guidelines\n")
+            sb.append("1. Scene graph: read the `.tscn` files above and understand the node tree, including the hierarchy of Camera3D, CharacterBody3D, Marker3D, and UI nodes.\n")
+            sb.append("2. Physics: when the code uses `PhysicsRayQueryParameters3D`, verify `collision_layer` and `collision_mask` so the ray hits the intended targets.\n")
+            sb.append("3. Resource loading: use `preload()` for resources that are always needed and `load()` for dynamic resources.\n")
+            sb.append("4. UI in 3D: nodes under CanvasLayer use screen coordinates. For a screen-center crosshair, use `get_viewport().get_visible_rect().size / 2`.\n")
+            sb.append("5. Decoupling: prefer signals and groups over hard-coded node paths such as `get_node(\"../../Player\")`. Use `get_tree().get_nodes_in_group(\"player_team\")` where appropriate.\n\n")
         }
 
-        // TUB 同款：强制输出 Python 脚本，并给出严格的防翻车规范
         if (mode == "TUB_STYLE") {
-            sb.append("### TUB 自动化工作流（极高优先级）\n")
-            sb.append("为了批量修改项目文件，**你必须输出一个可以直接在项目根目录运行的纯 Python 脚本**（例如 `patch.py`）。\n")
-            sb.append("该脚本的核心要求如下（请严格遵守，否则极易引发语法崩溃）：\n")
-            sb.append("1. **路径处理**：使用 `pathlib.Path`，不要混用绝对路径，基于当前脚本所在目录（`root = Path(__file__).resolve().parent`）。\n")
-            sb.append("2. **编码格式**：写入文件时，**必须**指定 `encoding=\"utf-8\"` 和 `newline=\"\\n\"`（防止 Windows 换行符污染 GDScript）。\n")
-            sb.append("3. **修改策略**：\n")
-            sb.append("   - 如果是**新增文件**，直接写入即可。\n")
-            sb.append("   - 如果是**覆盖文件**，请直接将完整的修改后代码写入，**避免**让用户去跑什么 `replace` 匹配，这样极易导致代码残缺。\n")
-            sb.append("   - 如果是**精准替换**，请使用 Python 的 raw string (`r\"\"\"...\"\"\"`) 包裹原代码和新代码，**绝对不要**让特殊符号（如 `\\n`, `\\t`, `\"`）在 Python 和 GDScript 之间发生转义冲突！\n")
-            sb.append("4. **代码风格**：脚本里被修改或新增的 GDScript 代码，请严格遵守 Godot 4.x 规范，缩进请使用 Tab 或 4 个空格，并保持格式一致。\n")
-            sb.append("5. **避免覆盖 `.uid` 或 `unique_id`**：保持这些标识符不变。\n\n")
+            sb.append("### Automated Patch Workflow (highest priority)\n")
+            sb.append("To modify the project, output a single standalone Python script (for example `patch.py`) that can be run from the project root.\n")
+            sb.append("Requirements:\n")
+            sb.append("1. Paths: use `pathlib.Path` and resolve everything from the script location (`root = Path(__file__).resolve().parent`). Do not mix in absolute paths.\n")
+            sb.append("2. Encoding: always write files with `encoding=\"utf-8\"` and `newline=\"\\n\"`.\n")
+            sb.append("3. Strategy:\n")
+            sb.append("   - New files: write them directly.\n")
+            sb.append("   - Full rewrites: write the complete file content.\n")
+            sb.append("   - Targeted edits: wrap the old and new code in Python raw strings (`r\"\"\"...\"\"\"`). Do not rely on escape-prone string replacement.\n")
+            sb.append("4. Style: keep the generated GDScript consistent with Godot 4.x formatting (tabs or four spaces, but not mixed).\n")
+            sb.append("5. Do not modify `.uid` files or `unique_id` values.\n\n")
         }
 
-        sb.append("### 用户需求\n")
-        sb.append("请仔细阅读上述项目结构及代码，等待用户的具体游戏开发需求。\n")
-        
+        sb.append("### Request\n")
+        sb.append("Read the project structure and code above, then wait for the user's development request.\n")
+
         return sb.toString()
+    }
+    // ================== 原生扫描与路径解析 ==================
+
+    private fun readText(context: Context, node: FileNode, source: TextSource? = null): String {
+        source?.let { return it.get(node) }
+        // 大文件用 64KB 缓冲，减少 read syscall 次数
+        node.file?.let { file ->
+            return file.inputStream().use { input ->
+                input.reader(Charsets.UTF_8).buffered(64 * 1024).readText()
+            }
+        }
+        return context.contentResolver.openInputStream(node.uri)?.bufferedReader()?.use { it.readText() } ?: ""
+    }
+
+    /**
+     * 把 SAF 树 URI（content://...）解析为真实文件路径。
+     * 只处理本地存储卷（primary / SD 卡），其它 provider 返回 null 以回退 SAF。
+     */
+    private fun resolveTreeUriToFile(uri: Uri): File? {
+        return try {
+            val docId = DocumentsContract.getTreeDocumentId(uri)
+            val parts = docId.split(":", limit = 2)
+            if (parts.size != 2) return null
+            val volume = parts[0]
+            val relative = parts[1]
+            val base = if (volume.equals("primary", true) || volume.equals("home", true)) {
+                Environment.getExternalStorageDirectory()
+            } else {
+                File("/storage", volume)
+            }
+            val target = if (relative.isBlank()) base else File(base, relative)
+            if (target.isDirectory && target.canRead()) target else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun buildNativeRoot(root: File, hardExcludes: Set<String>): Pair<FileNode, String>? {
+        if (!root.isDirectory || !root.canRead()) return null
+        val skipDirs = DEFAULT_HARD_DIRS + hardExcludes.map { it.removeSuffix("/") }
+        val entries = NativeScanner.listFiles(root, skipDirs) ?: return null
+        if (entries.isEmpty()) return null
+
+        val detectedVersion = detectVersionFromFile(File(root, "project.godot"))
+        val rootNode = FileNode(root.name, true, Uri.EMPTY, 0, null, file = root)
+
+        // 目录索引：按相对路径缓存，避免每个文件都做一次线性查找（大项目下是 O(n²)）
+        val dirCache = HashMap<String, FileNode>()
+        dirCache[""] = rootNode
+
+        entries.forEach { entry ->
+            val rel = entry.relativePath
+            val name = rel.substringAfterLast('/')
+            val ext = name.substringAfterLast(".").lowercase()
+            if (hardExcludes.contains(".$ext") || hardExcludes.contains(ext)) {
+                return@forEach
+            }
+
+            val parent = getOrCreateDir(dirCache, rel.substringBeforeLast('/', ""), root, rootNode)
+            val file = File(root, rel)
+            val size = if (entry.size >= 0) entry.size else file.length()
+            parent.children.add(FileNode(name, false, Uri.EMPTY, size, null, file = file))
+        }
+        return rootNode to detectedVersion
+    }
+
+    private interface TextSource {
+        fun get(node: FileNode): String
+        fun close() {}
+    }
+
+    /**
+     * 分批流水线：写入线程按输出顺序消费，后台线程并行预读后面几个文件。
+     * 同时受「窗口文件数」和「待读字节数」双重限制，内存可控。
+     */
+    private class TextPipeline(
+        private val ordered: List<FileNode>,
+        private val loader: (FileNode) -> String,
+        private val maxPendingFiles: Int = 6,
+        private val maxPendingBytes: Long = 8L * 1024 * 1024
+    ) : TextSource {
+
+        private class Pending(
+            val node: FileNode,
+            val future: java.util.concurrent.Future<String>,
+            val size: Long
+        )
+
+        private val executor = Executors.newFixedThreadPool(
+            Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+        ) { runnable -> Thread(runnable, "tub-pipeline").apply { isDaemon = true } }
+
+        private val pending = ArrayDeque<Pending>()
+        private var nextToSchedule = 0
+        private var pendingBytes = 0L
+
+        private fun schedule() {
+            while (nextToSchedule < ordered.size && pending.size < maxPendingFiles) {
+                val node = ordered[nextToSchedule]
+                if (pending.isNotEmpty() && pendingBytes + node.size > maxPendingBytes) {
+                    break
+                }
+                nextToSchedule++
+                pendingBytes += node.size
+                pending.addLast(Pending(node, executor.submit(Callable { loader(node) }), node.size))
+            }
+        }
+
+        override fun get(node: FileNode): String {
+            if (pending.isEmpty()) schedule()
+            val iterator = pending.iterator()
+            while (iterator.hasNext()) {
+                val item = iterator.next()
+                if (item.node === node) {
+                    iterator.remove()
+                    pendingBytes -= item.size
+                    schedule()
+                    return try {
+                        item.future.get()
+                    } catch (_: Exception) {
+                        loader(node)
+                    }
+                }
+            }
+            // 顺序不符（例如过滤结果在扫描期间变化），退回同步读取
+            return loader(node)
+        }
+
+        override fun close() {
+            executor.shutdownNow()
+        }
+    }
+
+    /**
+     * 按输出顺序收集「会被读取内容」的文件，供流水线预读。
+     * 注意：children 的排序必须与 buildOutput 中的排序一致。
+     */
+    private fun collectTextNodes(
+        context: Context,
+        rootNode: FileNode,
+        softExcludes: Set<String>,
+        maxFileSizeKb: Int
+    ): List<FileNode> {
+        val result = ArrayList<FileNode>()
+
+        fun walk(node: FileNode) {
+            if (node.isDir) {
+                node.children.sortedBy { it.sortKey }.forEach(::walk)
+                return
+            }
+            val ext = node.name.substringAfterLast(".").lowercase()
+            if (softExcludes.contains(".$ext") || softExcludes.contains(ext)) return
+            if (node.size > maxFileSizeKb * 1024L) return
+            if (!isTextFile(context, node)) return
+            result.add(node)
+        }
+        walk(rootNode)
+        return result
+    }
+
+    private fun getOrCreateDir(
+        dirs: MutableMap<String, FileNode>, path: String, root: File, rootNode: FileNode
+    ): FileNode {
+        if (path.isEmpty()) return rootNode
+        dirs[path]?.let { return it }
+        val parent = getOrCreateDir(dirs, path.substringBeforeLast('/', ""), root, rootNode)
+        val node = FileNode(path.substringAfterLast('/'), true, Uri.EMPTY, 0, null, file = File(root, path))
+        parent.children.add(node)
+        dirs[path] = node
+        return node
+    }
+
+    private fun detectVersionFromFile(file: File): String {
+        if (!file.isFile) return "Unknown"
+        return try {
+            detectVersionFromText(file.bufferedReader().use { it.readText() })
+        } catch (_: Exception) {
+            "Unknown"
+        }
+    }
+
+    private fun detectVersionFromText(text: String): String {
+        val match = Regex("""config/features\s*=\s*PackedStringArray\("([^"]+)""").find(text)
+        if (match != null) {
+            val raw = match.groupValues[1]
+            val parts = raw.split(".")
+            return if (parts.size >= 2) "${parts[0]}.${parts[1]}" else raw
+        }
+        return if (text.contains("config_version=5")) "4.x" else "Unknown"
+    }
+
+    /**
+     * 边写边统计字符/行数，并截取前 N 个字符作为预览。
+     */
+    /**
+     * 输出目标：既能按字符追加，也能把文件内容按原始字节写入。
+     */
+    private interface ContentSink : Appendable {
+        fun appendFileContent(node: FileNode)
+    }
+
+    /** 内存模式：内容仍读成 String 后追加 */
+    private class StringBuilderSink(
+        capacity: Int,
+        private val load: (FileNode) -> String
+    ) : ContentSink {
+        private val builder = StringBuilder(capacity)
+
+        override fun append(csq: CharSequence?): Appendable {
+            builder.append(csq)
+            return this
+        }
+
+        override fun append(csq: CharSequence?, start: Int, end: Int): Appendable {
+            builder.append(csq, start, end)
+            return this
+        }
+
+        override fun append(c: Char): Appendable {
+            builder.append(c)
+            return this
+        }
+
+        override fun appendFileContent(node: FileNode) {
+            builder.append(load(node))
+        }
+
+        fun text(): String = builder.toString()
+    }
+
+    /**
+     * 流式模式：文件内容直接以 UTF-8 原始字节写入输出流，跳过 decode/encode。
+     * 字符数按 UTF-8 首字节统计（非连续字节即为一个字符），行数按 0x0A 统计。
+     */
+    private class StreamingSink(
+        private val writer: Writer,
+        private val output: OutputStream,
+        private val previewLimit: Int,
+        private val zeroCopy: Boolean,
+        private val load: (FileNode) -> String
+    ) : ContentSink {
+        private val previewBytes = ByteArrayOutputStream(minOf(previewLimit, 8192))
+        var chars: Long = 0L
+            private set
+        var newlines: Int = 0
+            private set
+
+        override fun append(csq: CharSequence?): Appendable = append(csq, 0, csq?.length ?: 0)
+
+        override fun append(csq: CharSequence?, start: Int, end: Int): Appendable {
+            if (csq != null && end > start) {
+                chars += (end - start)
+                var searchFrom = start
+                while (searchFrom < end) {
+                    val index = csq.indexOf('\n', searchFrom)
+                    if (index < 0 || index >= end) break
+                    newlines++
+                    searchFrom = index + 1
+                }
+                if (previewBytes.size() < previewLimit) {
+                    capture(csq.subSequence(start, end).toString().toByteArray(Charsets.UTF_8))
+                }
+                writer.append(csq, start, end)
+            }
+            return this
+        }
+
+        override fun append(c: Char): Appendable {
+            chars++
+            if (c == '\n') newlines++
+            if (previewBytes.size() < previewLimit) {
+                capture(c.toString().toByteArray(Charsets.UTF_8))
+            }
+            writer.append(c)
+            return this
+        }
+
+        private fun capture(bytes: ByteArray, length: Int = bytes.size) {
+            if (length <= 0) return
+            val room = previewLimit - previewBytes.size()
+            if (room <= 0) return
+            previewBytes.write(bytes, 0, minOf(length, room))
+        }
+
+        override fun appendFileContent(node: FileNode) {
+            val file = node.file
+            if (!zeroCopy || file == null) {
+                // 关闭零拷贝，或 SAF 没有真实路径时，退回字符读取
+                append(load(node))
+                return
+            }
+            writer.flush()
+            val buffer = ByteArray(64 * 1024)
+            file.inputStream().use { input ->
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    for (i in 0 until read) {
+                        val b = buffer[i].toInt() and 0xFF
+                        if (b == 0x0A) newlines++
+                        if ((b and 0xC0) != 0x80) chars++
+                    }
+                    capture(buffer, read)
+                    output.write(buffer, 0, read)
+                }
+            }
+            output.flush()
+        }
+
+        fun previewText(): String {
+            if (previewBytes.size() == 0) return ""
+            val text = String(previewBytes.toByteArray(), Charsets.UTF_8)
+            // 截断可能落在多字节字符中间，去掉末尾的替换符
+            return if (text.endsWith('\uFFFD')) text.dropLast(1) else text
+        }
     }
 }

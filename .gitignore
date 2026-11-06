@@ -1,4 +1,6 @@
 .gradle/
+.cxx/
+.kotlin/
 build/
 local.properties
 .idea/
@@ -6,3 +8,4 @@ local.properties
 *.zip
 *.iml
 .DS_Store
+构建日志.log
