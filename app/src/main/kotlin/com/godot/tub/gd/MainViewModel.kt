@@ -19,6 +19,13 @@ import java.io.File
 
 data class SelectedFile(val uri: Uri, val name: String)
 
+/** 用户自定义提示词；内置模式（GENERAL / ADVANCED / TUB_STYLE）不在这里。 */
+data class PromptTemplate(
+    val id: String,
+    val name: String,
+    val body: String
+)
+
 data class AppSettings(
     val themeMode: Int = 0,
     val outputPath: String = "/storage/emulated/0/Documents/",
@@ -30,7 +37,8 @@ data class AppSettings(
     val maxFileSizeKb: Int = 100,
     val showGlobalFileSize: Boolean = true,
     val streamOutput: Boolean = true,
-    val zeroCopy: Boolean = true
+    val zeroCopy: Boolean = true,
+    val customPrompts: List<PromptTemplate> = emptyList()
 )
 
 data class ExportResult(
@@ -92,7 +100,8 @@ class MainViewModel : ViewModel() {
             maxFileSizeKb = prefs.getInt("maxFileSizeKb", 100),
             showGlobalFileSize = prefs.getBoolean("showGlobalFileSize", true),
             streamOutput = prefs.getBoolean("streamOutput", true),
-            zeroCopy = prefs.getBoolean("zeroCopy", true)
+            zeroCopy = prefs.getBoolean("zeroCopy", true),
+            customPrompts = parsePromptTemplates(prefs.getString("customPrompts", "") ?: "")
         )
         lastSeenAnnouncementId = prefs.getInt("lastAnnouncementId", 0)
 
@@ -151,6 +160,7 @@ class MainViewModel : ViewModel() {
                 putBoolean("showGlobalFileSize", newSettings.showGlobalFileSize)
                 putBoolean("streamOutput", newSettings.streamOutput)
                 putBoolean("zeroCopy", newSettings.zeroCopy)
+                putString("customPrompts", serializePromptTemplates(newSettings.customPrompts))
                 apply()
             }
         }
@@ -173,7 +183,7 @@ class MainViewModel : ViewModel() {
                     val scanResult = SourceMergeUtils.scanDirectoryToFile(
                         context, uri, cfg.format, cfg.exportMode, cfg.promptMode,
                         cfg.softExcludeRules, cfg.hardExcludeRules, cfg.maxFileSizeKb, cfg.showGlobalFileSize,
-                        outFile, previewLimit = 50_000, zeroCopy = cfg.zeroCopy
+                        outFile, previewLimit = 50_000, zeroCopy = cfg.zeroCopy, customPrompts = cfg.promptBodyMap()
                     )
                     val newResult = ExportResult(
                         fileName = outFile.name,
@@ -190,7 +200,8 @@ class MainViewModel : ViewModel() {
                     currentScreen.value = "result"
                 } else {
                     val scanResult = SourceMergeUtils.scanDirectory(
-                        context, uri, cfg.format, cfg.exportMode, cfg.promptMode, cfg.softExcludeRules, cfg.hardExcludeRules, cfg.maxFileSizeKb, cfg.showGlobalFileSize
+                        context, uri, cfg.format, cfg.exportMode, cfg.promptMode, cfg.softExcludeRules, cfg.hardExcludeRules, cfg.maxFileSizeKb, cfg.showGlobalFileSize,
+                        customPrompts = cfg.promptBodyMap()
                     )
                     saveResult(folderName, scanResult.content, scanResult.godotVersion)
                 }
@@ -343,6 +354,48 @@ class MainViewModel : ViewModel() {
     fun clearHistory() {
         historyList.value = emptyList()
         if (historyFile.exists()) historyFile.delete()
+    }
+
+    /** 自定义提示词按 id -> 正文交给导出层；内置模式不需要查表。 */
+    private fun AppSettings.promptBodyMap(): Map<String, String> =
+        customPrompts.associate { it.id to it.body }
+
+    private fun parsePromptTemplates(raw: String): List<PromptTemplate> {
+        if (raw.isBlank()) return emptyList()
+        return try {
+            val array = JSONArray(raw)
+            buildList {
+                for (i in 0 until array.length()) {
+                    val obj = array.optJSONObject(i)
+                    if (obj != null) {
+                        val id = obj.optString("id")
+                        if (id.isNotBlank()) {
+                            add(
+                                PromptTemplate(
+                                    id = id,
+                                    name = obj.optString("name").ifBlank { "自定义提示词" },
+                                    body = obj.optString("body")
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun serializePromptTemplates(templates: List<PromptTemplate>): String {
+        val array = JSONArray()
+        templates.forEach { template ->
+            array.put(JSONObject().apply {
+                put("id", template.id)
+                put("name", template.name)
+                put("body", template.body)
+            })
+        }
+        return array.toString()
     }
 
     fun viewHistoryItem(item: ExportResult) {

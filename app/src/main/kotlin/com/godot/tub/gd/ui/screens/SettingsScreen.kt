@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.godot.tub.gd.AppSettings
+import com.godot.tub.gd.PromptTemplate
 import com.godot.tub.gd.utils.AnnouncementUtils
 import com.godot.tub.gd.utils.SourceMergeUtils
 import kotlinx.coroutines.launch
@@ -58,6 +59,8 @@ fun SettingsScreen(
     var showPathDialog by remember { mutableStateOf(false) }
     var showAddRuleDialog by remember { mutableStateOf(false) }
     var showPromptDialog by remember { mutableStateOf(false) }
+    var showPromptEditor by remember { mutableStateOf(false) }
+    var editingPrompt by remember { mutableStateOf<PromptTemplate?>(null) }
     var showDefaultRulesDialog by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var ruleToDelete by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
@@ -76,18 +79,21 @@ fun SettingsScreen(
         ), label = "bounce"
     )
 
-    val promptModeColor = when (settings.promptMode) {
-        "GENERAL" -> MaterialTheme.colorScheme.secondary
-        "ADVANCED" -> MaterialTheme.colorScheme.tertiary
-        "TUB_STYLE" -> MaterialTheme.colorScheme.error
+    val activeCustomPrompt = settings.customPrompts.firstOrNull { "CUSTOM:" + it.id == settings.promptMode }
+    val promptModeColor = when {
+        settings.promptMode == "GENERAL" -> MaterialTheme.colorScheme.secondary
+        settings.promptMode == "ADVANCED" -> MaterialTheme.colorScheme.tertiary
+        settings.promptMode == "TUB_STYLE" -> MaterialTheme.colorScheme.error
+        activeCustomPrompt != null -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
 
-    val promptModeText = when (settings.promptMode) {
-        "NONE" -> "不注入（纯净模式）"
-        "GENERAL" -> "通用开发"
-        "ADVANCED" -> "进阶开发"
-        "TUB_STYLE" -> "TUB 同款"
+    val promptModeText = when {
+        settings.promptMode == "NONE" -> "不注入（纯净模式）"
+        settings.promptMode == "GENERAL" -> "通用开发"
+        settings.promptMode == "ADVANCED" -> "进阶开发"
+        settings.promptMode == "TUB_STYLE" -> "TUB 同款"
+        activeCustomPrompt != null -> "自定义 · ${activeCustomPrompt.name}"
         else -> "未选择"
     }
 
@@ -295,20 +301,33 @@ fun SettingsScreen(
     }
 
     if (showPromptDialog) {
-        val promptModes = listOf(
+        val builtinModes = listOf(
             PromptModeOption("NONE", "不注入", "仅保留项目结构，适合让 AI 自己分析或你完全自定义提示词。", MaterialTheme.colorScheme.onSurfaceVariant),
             PromptModeOption("GENERAL", "通用开发", "扩展性极高，仅注入基本语法标准，适合简单问答和自由发挥。", MaterialTheme.colorScheme.secondary),
             PromptModeOption("ADVANCED", "进阶开发", "如同高级工程师全方位重构，并针对 3D 场景与物理深度优化。", MaterialTheme.colorScheme.tertiary),
             PromptModeOption("TUB_STYLE", "TUB 同款", "在进阶基础上强制 AI 生成 Python 一键构建脚本，效率翻三倍。", MaterialTheme.colorScheme.error)
         )
+
         AlertDialog(
             onDismissRequest = { showPromptDialog = false },
             shape = RoundedCornerShape(32.dp),
-            title = { Text("AI 提示词模式", style = MaterialTheme.typography.headlineSmall) },
+            title = { Text("AI 提示词", style = MaterialTheme.typography.headlineSmall) },
             text = {
-                Column {
-                    promptModes.forEach { option ->
-                        val isSelected = (settings.promptMode == option.id)
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 460.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        "提示词会放在导出文档的最前面，AI 会先读到任务约束。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text("内置提示词", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    builtinModes.forEach { option ->
+                        val isSelected = settings.promptMode == option.id
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -316,7 +335,7 @@ fun SettingsScreen(
                                     onUpdateSettings { it.copy(promptMode = option.id) }
                                     showPromptDialog = false
                                 })
-                                .padding(vertical = 10.dp, horizontal = 4.dp),
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
@@ -324,8 +343,8 @@ fun SettingsScreen(
                                 onClick = null,
                                 colors = RadioButtonDefaults.colors(selectedColor = option.color)
                             )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = option.title,
                                     color = if (isSelected) option.color else MaterialTheme.colorScheme.onSurface,
@@ -340,12 +359,149 @@ fun SettingsScreen(
                                     modifier = Modifier.padding(top = 2.dp)
                                 )
                             }
+                            if (option.id != "NONE") {
+                                IconButton(onClick = {
+                                    editingPrompt = PromptTemplate(
+                                        id = "",
+                                        name = "自定义 · ${option.title}",
+                                        body = SourceMergeUtils.buildPrompt(option.id, "4.x")
+                                    )
+                                    showPromptDialog = false
+                                    showPromptEditor = true
+                                }) {
+                                    Icon(
+                                        Icons.Default.ContentCopy,
+                                        contentDescription = "复制并修改",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text("我的提示词", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.tertiary)
+                    if (settings.customPrompts.isEmpty()) {
+                        Text(
+                            "还没有自定义提示词。可以从内置提示词复制一份，或者新建一个。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+                    settings.customPrompts.forEach { template ->
+                        val optionId = "CUSTOM:" + template.id
+                        val isSelected = settings.promptMode == optionId
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .selectable(selected = isSelected, onClick = {
+                                    onUpdateSettings { it.copy(promptMode = optionId) }
+                                    showPromptDialog = false
+                                })
+                                .padding(vertical = 6.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = null,
+                                colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    template.name,
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 15.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    template.body.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty(),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            IconButton(onClick = {
+                                editingPrompt = template
+                                showPromptDialog = false
+                                showPromptEditor = true
+                            }) {
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = "编辑",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            IconButton(onClick = {
+                                onUpdateSettings { current ->
+                                    current.copy(
+                                        customPrompts = current.customPrompts.filterNot { it.id == template.id },
+                                        promptMode = if (current.promptMode == optionId) "GENERAL" else current.promptMode
+                                    )
+                                }
+                            }) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "删除",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = {
+                            editingPrompt = PromptTemplate(id = "", name = "", body = "")
+                            showPromptDialog = false
+                            showPromptEditor = true
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        shape = CircleShape
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("新建提示词", style = MaterialTheme.typography.labelLarge)
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showPromptDialog = false }) { Text("取消") } }
+            confirmButton = { TextButton(onClick = { showPromptDialog = false }) { Text("完成") } }
         )
+    }
+
+    editingPrompt?.let { editing ->
+        if (showPromptEditor) {
+            PromptEditorDialog(
+                initial = editing,
+                onDismiss = {
+                    showPromptEditor = false
+                    editingPrompt = null
+                },
+                onSave = { name, body ->
+                    val templateId = editing.id.takeIf { it.isNotBlank() }
+                        ?: "custom_" + System.currentTimeMillis()
+                    onUpdateSettings { current ->
+                        val list = current.customPrompts.toMutableList()
+                        val index = list.indexOfFirst { it.id == templateId }
+                        val template = PromptTemplate(templateId, name, body)
+                        if (index >= 0) list[index] = template else list.add(template)
+                        current.copy(customPrompts = list, promptMode = "CUSTOM:" + templateId)
+                    }
+                    showPromptEditor = false
+                    editingPrompt = null
+                }
+            )
+        }
     }
 
     // === 主 UI ===
@@ -764,6 +920,75 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun PromptEditorDialog(
+    initial: PromptTemplate,
+    onSave: (String, String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var name by remember(initial) { mutableStateOf(initial.name) }
+    var body by remember(initial) { mutableStateOf(initial.body) }
+    val canSave = name.isNotBlank() && body.isNotBlank()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(32.dp),
+        title = {
+            Text(
+                if (initial.id.isBlank()) "新建提示词" else "编辑提示词",
+                style = MaterialTheme.typography.headlineSmall
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 460.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("名称") },
+                    placeholder = { Text("例如：我的项目规范") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp)
+                )
+                Spacer(modifier = Modifier.height(14.dp))
+                OutlinedTextField(
+                    value = body,
+                    onValueChange = { body = it },
+                    label = { Text("提示词正文") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 220.dp),
+                    textStyle = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp
+                    ),
+                    shape = RoundedCornerShape(18.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "提示词会放在导出文档的最前面。支持 {{version}} 占位符，导出时替换为识别到的 Godot 版本（如 4.6）。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = canSave,
+                onClick = { onSave(name.trim(), body.trim()) }
+            ) {
+                Text("保存", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
 }
 
 private data class PromptModeOption(val id: String, val title: String, val desc: String, val color: Color)

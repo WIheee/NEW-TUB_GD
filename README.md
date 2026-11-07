@@ -2,7 +2,7 @@
 
 把整个 Godot 项目打包成一份结构清晰、对 AI 友好的上下文文档（Markdown / TXT / XML），并附带可直接使用的英文任务提示词。
 
-> 当前版本：**B1**（beta 1）
+> 当前版本：**B2**（beta 2）
 
 ---
 
@@ -51,8 +51,10 @@
 
 ### AI 提示词
 
-- 四档：不注入 / 通用开发 / 进阶开发 / TUB 同款
+- **放在文档最前面**：AI 先读到任务约束，再读目录与源码，长上下文里不容易「忘掉」要求
+- 内置四档：不注入 / 通用开发 / 进阶开发 / TUB 同款
 - 全英文、无 emoji，按 Godot 4.4 / 4.6 / 4.7 注入差异化红线（`.uid`、`unique_id`、Jolt、`is_class`、`RichTextLabel`、`PackedArray`、类型化返回值）
+- **可自定义**：任意内置提示词都能「复制并修改」，也可以从零新建；支持 `{{version}}` 占位符，导出时替换为识别到的版本
 - TUB 模式强制输出可一键运行的 Python 补丁脚本
 
 ### 公告与升级提示
@@ -113,10 +115,11 @@ cd TUB_GD
 app/src/main/kotlin/com/godot/tub/gd/
 ├── MainActivity.kt          # 入口与导航
 ├── MainViewModel.kt         # 状态、设置、导出
-├── ui/screens/              # 首页 / 合并 / 结果 / 设置
+├── ui/screens/              # 首页 / 合并 / 结果 / 设置 / 公告
 ├── ui/theme/                # M3 Expressive 主题
 └── utils/
     ├── SourceMergeUtils.kt  # 扫描、过滤、格式化、提示词
+    ├── AnnouncementUtils.kt # 远程公告拉取与解析
     └── NativeScanner.kt     # JNI 封装
 app/src/main/cpp/            # C++ 多线程遍历
 ```
@@ -129,7 +132,7 @@ app/src/main/cpp/            # C++ 多线程遍历
 - [Announcement.md](Announcement.md)：应用内公告数据源（格式说明见文件顶部）
 - [CHANGELOG.md](CHANGELOG.md)：版本变更
 - [docs/RELEASING.md](docs/RELEASING.md)：发版流程与 Release Notes 模板
-- [docs/releases/B1.md](docs/releases/B1.md)：当前版本发布说明
+- [docs/releases/B2.md](docs/releases/B2.md)：当前版本发布说明
 
 ---
 

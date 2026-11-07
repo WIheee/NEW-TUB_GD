@@ -12,8 +12,8 @@
 - 版本号写在 `app/build.gradle` 的 `defaultConfig` 中：
 
 ```groovy
-versionCode 183
-versionName 'B1'
+versionCode 184
+versionName 'B2'
 ```
 
 > 应用内「关于」页读取的是系统 `PackageInfo.versionName`，无需手动同步。
@@ -43,7 +43,7 @@ versionName 'B1'
 - [ ] 打 tag 并推送：
 
 ```bash
-git tag -a B1 -m "TUB_GD B1"
+git tag -a B2 -m "TUB_GD B2"
 git push origin main --tags
 ```
 

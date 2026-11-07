@@ -2,7 +2,7 @@
 
 > 面向：接手本仓库的 AI 编码代理（以及人类协作者）。
 > 目标：让你在 **不读完全部源码** 的前提下，知道项目是什么、代码在哪、改动会牵动什么、哪些地方一碰就坏。
-> 事实基准：`B1`（versionCode 183）。若版本号已变，先看 `CHANGELOG.md` 与 `app/build.gradle`。
+> 事实基准：`B2`（versionCode 184）。若版本号已变，先看 `CHANGELOG.md` 与 `app/build.gradle`。
 
 ---
 
@@ -18,11 +18,11 @@
 
 ## 1. 项目是什么
 
-TUB_GD 把一整个 Godot 项目（或一堆散文件）打包成一份对 AI 友好的长文档（Markdown / TXT / XML），并可在末尾注入一段英文任务提示词，供网页版大模型直接消费。
+TUB_GD 把一整个 Godot 项目（或一堆散文件）打包成一份对 AI 友好的长文档（Markdown / TXT / XML），并在**文档开头**注入一段任务提示词（内置英文模板或用户自定义），供网页版大模型直接消费。
 
 - 包名 / namespace：`com.godot.tub.gd`
 - 应用名：`TUB_GD`
-- 源码规模：约 3.8k 行（12 个 Kotlin/C++ 文件），单模块 `:app`
+- 源码规模：约 4.4k 行（14 个 Kotlin/C++ 文件），单模块 `:app`
 - 远端：`git@github.com:WIheee/NEW-TUB_GD.git`；README、设置页「关于」与内置公告地址统一指向 `https://github.com/WIheee/NEW-TUB_GD`
 
 ### 用户可见的核心流程
@@ -33,7 +33,7 @@ TUB_GD 把一整个 Godot 项目（或一堆散文件）打包成一份对 AI �
          └─► SourceMergeUtils.scanDirectoryToFile / scanDirectory
                ├─ buildRootNode        → C++ 原生遍历，失败回落 SAF
                ├─ (FULL_EXPORT 时) collectTextNodes + TextPipeline 并行预读
-               └─ buildOutput          → 目录树 + 文件内容 + 提示词
+               └─ buildOutput          → 提示词 + 目录树 + 文件内容
                      └─ StreamingSink / StringBuilderSink
    └─► 写 <输出目录>/<文件夹名>_source.md
    └─► ExportResult → 结果页 + 历史记录（最多 20 条）
@@ -85,18 +85,18 @@ TUB_GD 把一整个 Godot 项目（或一堆散文件）打包成一份对 AI �
 app/src/main/
 ├── AndroidManifest.xml                 # MANAGE_EXTERNAL_STORAGE、FileProvider
 ├── kotlin/com/godot/tub/gd/
-│   ├── MainActivity.kt        (225)    # 单 Activity；权限申请；顶部导航状态机；Toast 错误
-│   ├── MainViewModel.kt       (308)    # AppSettings/ExportResult；扫描调度；写盘；历史记录 JSON
+│   ├── MainActivity.kt        (242)    # 单 Activity；权限申请；顶部导航状态机；Toast 错误
+│   ├── MainViewModel.kt       (405)    # AppSettings/ExportResult；提示词；扫描调度；写盘；历史
 │   ├── ui/theme/Theme.kt      (125)    # M3 动态取色、Expressive 圆角/字号；状态栏着色
 │   ├── ui/screens/
-│   │   ├── HomeScreen.kt      (303)    # 首页：选目录、进合并、历史弹窗
+│   │   ├── HomeScreen.kt      (311)    # 首页：选目录、进合并、历史弹窗、公告入口
 │   │   ├── MultiFileScreen.kt (173)    # 散文件列表、添加/移除/开始合并
 │   │   ├── ResultScreen.kt    (252)    # 统计、复制、分享、预览（流式为预览）
-│   │   ├── SettingsScreen.kt  (768)    # 全部设置与规则编辑（最大的 UI 文件）
+│   │   ├── SettingsScreen.kt  (994)    # 设置、规则编辑、提示词管理（最大的 UI 文件）
 │   │   ├── Components.kt      (296)    # ExpressiveCard / SegmentedControl / TabBar / Loading
 │   │   └── AnnouncementDialog.kt       # 公告弹窗（未读列表 + 前往更新）
 │   └── utils/
-│       ├── SourceMergeUtils.kt(996)    # ★ 核心：扫描、过滤、格式化、提示词、两个 Sink
+│       ├── SourceMergeUtils.kt(1024)   # ★ 核心：扫描、过滤、格式化、提示词、两个 Sink
 │       ├── AnnouncementUtils.kt        # 远程公告：拉取 Announcement.md + 解析 + 常量 URL
 │       └── NativeScanner.kt    (42)    # JNI 封装，解析 "<size>\x01<relPath>"
 ├── cpp/native_scanner.cpp     (208)    # 一级子目录 2~4 线程并行遍历，stat 回传大小
@@ -112,7 +112,7 @@ app/src/main/
 | 建树 | `buildRootNode` → `buildNativeRoot` / `buildSafRoot` | 原生优先，失败回落 SAF |
 | 路径 | `resolveTreeUriToFile` | 只处理 primary/home/SD 卷，其它 provider 返回 null |
 | 输出 | `buildOutput`（分支：PROJECT_CONFIG / XML / MD+TXT） | 所有格式的唯一汇集点 |
-| 提示词 | `buildPrompt(mode, version)` | NONE / GENERAL / ADVANCED / TUB_STYLE |
+| 提示词 | `buildPrompt(mode, version, customPrompts)` | NONE / GENERAL / ADVANCED / TUB_STYLE / `CUSTOM:<id>` |
 | 并行读 | `TextPipeline` + `collectTextNodes` | 窗口 6 文件 / 8MB |
 | 写出 | `ContentSink` → `StringBuilderSink` / `StreamingSink` | 流式先写 `.part` 再改名 |
 
@@ -125,6 +125,7 @@ app/src/main/
 - **输出文件**：默认 `/storage/emulated/0/Documents/`，命名 `<根文件夹名>_source.<md|txt|xml>`；多文件为 `MultiFiles_source.*`。
 - **导出统计**：字符数、行数、token 估算 = `charCount / 4`。
 - **迁移**：旧值 `exportMode == "PROJECT_SUMMARY"` 在 `init` 里被改写成 `DIR_ONLY`——新增模式时别复用旧字符串。
+- **自定义提示词**：`SharedPreferences` 键 `customPrompts`，存 JSON 数组（`id/name/body`）；选中项用 `promptMode = "CUSTOM:<id>"` 表示。内置提示词不落盘，始终由代码生成。
 - **公告**：数据源是仓库根目录 `Announcement.md`，经 `https://raw.githubusercontent.com/WIheee/NEW-TUB_GD/main/Announcement.md` 拉取（无鉴权，公开仓库才能用）。本机只持久化 `lastAnnouncementId`（同一个 SharedPreferences 文件）与内存中的 `announcements`。启动静默拉取，拉取失败静默忽略；手动入口是首页喇叭图标。
 
 ---
@@ -143,7 +144,8 @@ app/src/main/
 8. **XML 必须转义 CDATA。** 所有写内容的地方都做了 `replace("]]>", "]]]]><![CDATA[>")`。新增 XML 分支时照做，否则导出文件结构损坏。
 9. **提示词版本阈值是 4.4 / 4.6 / 4.7。** 版本来自 `project.godot` 的 `config/features = PackedStringArray("4.x")`，只取 `major.minor`；识别失败为 `"Unknown"`，此时 `buildPrompt` 按 4.0 规则走，UI 会弹一次提醒。
 10. **PROJECT_CONFIG 只对文件夹扫描生效**，且只收 `.godot` / `.cfg`；多文件合并路径不实现该模式。
-11. **公告 ID 只能递增、不能复用。** 解析器按 `## [数字] 标题` 切块，取块首连续的 `date/action/url/version` 行作元数据；模板/示例里不要出现真的数字 ID（用 `[ID]` 占位），否则会被当成真实公告。正文按纯文本渲染，不解析 Markdown。
+11. **提示词固定在文档最前面。** MD/TXT 在标题块之后、目录树之前；XML 是 `<prompt>` 在 `<structure>` 之前。内置文案里的 "above" 已改成 "follow/below"——**改提示词时不要在开头文案里写「上文/above」**，因为源码在它后面。
+12. **公告 ID 只能递增、不能复用。** 解析器按 `## [数字] 标题` 切块，取块首连续的 `date/action/url/version` 行作元数据；模板/示例里不要出现真的数字 ID（用 `[ID]` 占位），否则会被当成真实公告。正文按纯文本渲染，不解析 Markdown。
 
 ---
 
@@ -172,7 +174,9 @@ app/src/main/
 
 ### 改提示词
 
-只动 `buildPrompt`。它必须：全英文、无 emoji、无硬编码绝对路径、TUB_STYLE 必须强制"输出可一键运行的 Python 补丁脚本"。新增版本规则请加 `if (v >= 4.xf)` 分支，不要写死到通用段。
+内置文案只动 `buildPrompt`。它必须：全英文、无 emoji、无硬编码绝对路径、TUB_STYLE 必须强制"输出可一键运行的 Python 补丁脚本"。新增版本规则请加 `if (v >= 4.xf)` 分支，不要写死到通用段。
+
+用户自定义提示词走 `CUSTOM:<id>` 分支：正文从 `customPrompts` 取，支持 `{{version}}` 占位符；改选择/新增/编辑的 UI 在 `SettingsScreen` 的`AI 提示词`弹窗与 `PromptEditorDialog`，数据在 `AppSettings.customPrompts` + prefs JSON。
 
 ### 改原生扫描
 
@@ -212,7 +216,8 @@ app/src/main/
 - [ ] 流式写入 开 / 关；零拷贝 开 / 关（关时走 TextPipeline）
 - [ ] 多文件合并添加 3+ 个文件、移除、清空、合并
 - [ ] 结果页：复制内容、分享文件、历史记录点击（流式结果复制应能拿到全文）
-- [ ] 提示词四档切换（NONE 时文档末尾不应出现提示词）
+- [ ] 提示词四档切换（NONE 时文档开头不应出现提示词；提示词应在目录树之前）
+- [ ] 自定义提示词：从内置复制、新建、编辑、删除，导出后确认用的是自定义正文且 `{{version}}` 已被替换
 
 ---
 
@@ -231,7 +236,7 @@ app/src/main/
 
 ## 11. 版本与发布
 
-- 版本号只写在 `app/build.gradle` 的 `defaultConfig`（当前 `versionCode 183` / `versionName 'B1'`）；设置页"关于"读系统 `PackageInfo`，无需同步。
+- 版本号只写在 `app/build.gradle` 的 `defaultConfig`（当前 `versionCode 184` / `versionName 'B2'`）；设置页"关于"读系统 `PackageInfo`，无需同步。
 - beta 阶段用 `B1`、`B2`…；正式版回到语义化版本。
 - 发布步骤、Release Notes 模板、签名注意事项：`docs/RELEASING.md`。
 - 版本说明：`CHANGELOG.md`（分类：Added / Changed / Fixed / Performance）+ `docs/releases/<版本>.md`。
@@ -244,7 +249,7 @@ app/src/main/
 - `README.md`：功能与使用说明（面向用户）
 - `CHANGELOG.md`：变更历史
 - `docs/RELEASING.md`：发版流程
-- `docs/releases/B1.md`：当前版本发布说明
+- `docs/releases/B2.md`：当前版本发布说明（`B1.md` 保留为历史）
 - 仓库地址：<https://github.com/WIheee/NEW-TUB_GD>（同时用于「关于」跳转与公告拉取）
 - `Announcement.md`：公告数据源与格式说明
 

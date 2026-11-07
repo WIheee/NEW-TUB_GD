@@ -86,7 +86,8 @@ object SourceMergeUtils {
 
     fun scanDirectory(
         context: Context, treeUri: Uri, outputFormat: String, exportMode: String, promptMode: String, 
-        softExcludes: Set<String>, hardExcludes: Set<String>, maxFileSizeKb: Int, showGlobalFileSize: Boolean
+        softExcludes: Set<String>, hardExcludes: Set<String>, maxFileSizeKb: Int, showGlobalFileSize: Boolean,
+        customPrompts: Map<String, String> = emptyMap()
     ): ScanResult {
         val (rootNode, version) = buildRootNode(context, treeUri, hardExcludes)
             ?: return ScanResult("Unable to read this folder", "Unknown")
@@ -107,7 +108,7 @@ object SourceMergeUtils {
         }
         val sink = StringBuilderSink(estimated) { node -> readText(context, node, textSource) }
         try {
-            buildOutput(sink, context, rootNode.name, rootNode, outputFormat, exportMode, promptMode, softExcludes, maxFileSizeKb, showGlobalFileSize, version, textSource)
+            buildOutput(sink, context, rootNode.name, rootNode, outputFormat, exportMode, promptMode, softExcludes, maxFileSizeKb, showGlobalFileSize, version, textSource, customPrompts)
         } finally {
             textSource?.close()
         }
@@ -120,7 +121,8 @@ object SourceMergeUtils {
     fun scanDirectoryToFile(
         context: Context, treeUri: Uri, outputFormat: String, exportMode: String, promptMode: String,
         softExcludes: Set<String>, hardExcludes: Set<String>, maxFileSizeKb: Int, showGlobalFileSize: Boolean,
-        outFile: File, previewLimit: Int = 200_000, zeroCopy: Boolean = true
+        outFile: File, previewLimit: Int = 200_000, zeroCopy: Boolean = true,
+        customPrompts: Map<String, String> = emptyMap()
     ): ScanResult {
         val (rootNode, version) = buildRootNode(context, treeUri, hardExcludes)
             ?: return ScanResult("Unable to read this folder", "Unknown")
@@ -141,7 +143,7 @@ object SourceMergeUtils {
         val writer = output.writer(Charsets.UTF_8).buffered(128 * 1024)
         val sink = StreamingSink(writer, output, previewLimit, zeroCopy) { node -> readText(context, node, textSource) }
         try {
-            buildOutput(sink, context, rootNode.name, rootNode, outputFormat, exportMode, promptMode, softExcludes, maxFileSizeKb, showGlobalFileSize, version, textSource)
+            buildOutput(sink, context, rootNode.name, rootNode, outputFormat, exportMode, promptMode, softExcludes, maxFileSizeKb, showGlobalFileSize, version, textSource, customPrompts)
         } finally {
             writer.close()
             textSource?.close()
@@ -321,7 +323,7 @@ object SourceMergeUtils {
         sb: ContentSink,
         context: Context, projectName: String, rootNode: FileNode, 
         outputFormat: String, exportMode: String, promptMode: String, softExcludes: Set<String>, maxFileSizeKb: Int, showGlobalFileSize: Boolean,
-        godotVersion: String, textSource: TextSource? = null
+        godotVersion: String, textSource: TextSource? = null, customPrompts: Map<String, String> = emptyMap()
     ) {
         val date = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
         
@@ -376,6 +378,16 @@ object SourceMergeUtils {
         if (outputFormat == "XML") {
             sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<project name=\"$projectName\" godot_version=\"$godotVersion\" generated=\"$date\">\n")
             
+            // 提示词放最前面：AI 先读到任务约束，再读代码
+            if (exportMode == "FULL_EXPORT" && promptMode != "NONE") {
+                val prompt = buildPrompt(promptMode, godotVersion, customPrompts)
+                if (prompt.isNotBlank()) {
+                    sb.append("  <prompt>\n    <![CDATA[\n")
+                    sb.append(prompt.replace("]]>", "]]]]><![CDATA[>"))
+                    sb.append("\n]]>\n  </prompt>\n")
+                }
+            }
+
             sb.append("  <structure>\n    <![CDATA[\n")
             buildTree(rootNode, showGlobalFileSize = showGlobalFileSize).lineSequence().forEach { line ->
                 sb.append("    ").append(line).append('\n')
@@ -419,9 +431,6 @@ object SourceMergeUtils {
                 sb.append("  </files>\n")
             }
             
-            if (exportMode == "FULL_EXPORT" && promptMode != "NONE") {
-                sb.append("  <prompt>\n    <![CDATA[\n").append(buildPrompt(promptMode, godotVersion)).append("\n]]>\n  </prompt>\n")
-            }
             sb.append("</project>")
             return
         }
@@ -434,6 +443,20 @@ object SourceMergeUtils {
         } else {
             sb.append("Project: $projectName\n")
             sb.append("Generated: $date\n\n")
+        }
+
+        // 提示词放最前面：AI 先读到任务约束，再读目录与源码
+        if (exportMode == "FULL_EXPORT" && promptMode != "NONE") {
+            val prompt = buildPrompt(promptMode, godotVersion, customPrompts)
+            if (prompt.isNotBlank()) {
+                if (isMd) {
+                    sb.append(prompt)
+                    sb.append("---\n\n")
+                } else {
+                    sb.append(prompt.replace("##", "").replace("**", ""))
+                    sb.append("\n")
+                }
+            }
         }
 
         if (exportMode == "DIR_ONLY" || exportMode == "FULL_EXPORT") {
@@ -482,12 +505,6 @@ object SourceMergeUtils {
                 }
             }
             rootNode.children.sortedBy { it.sortKey }.forEach { extractContent(it, "") }
-        }
-
-        if (exportMode == "FULL_EXPORT" && promptMode != "NONE") {
-            val prompt = buildPrompt(promptMode, godotVersion)
-            if (isMd) sb.append(prompt)
-            else sb.append(prompt.replace("##", "").replace("**", ""))
         }
     }
 
@@ -621,15 +638,26 @@ object SourceMergeUtils {
         else -> ""
     }
 
-    private fun buildPrompt(mode: String, version: String): String {
+    /**
+     * 生成注入到文档开头的提示词。
+     * - 内置模式 GENERAL / ADVANCED / TUB_STYLE：按 Godot 版本注入差异化规则
+     * - 自定义模式 "CUSTOM:<id>"：正文取自 [customPrompts]，支持 {{version}} 占位符
+     */
+    fun buildPrompt(mode: String, version: String, customPrompts: Map<String, String> = emptyMap()): String {
         if (mode == "NONE") return ""
+
+        if (mode.startsWith("CUSTOM:")) {
+            val body = customPrompts[mode.removePrefix("CUSTOM:")].orEmpty()
+            if (body.isBlank()) return ""
+            return body.replace("{{version}}", version).trimEnd() + "\n\n"
+        }
 
         val v = version.toFloatOrNull() ?: 4.0f
         val sb = StringBuilder()
 
-        sb.append("---\n## AI Task Instructions (automatically injected)\n\n")
+        sb.append("## AI Task Instructions\n\n")
         sb.append("### Role\n")
-        sb.append("You are a senior Godot $version engineer. The context above contains the source code of a Godot $version project.\n\n")
+        sb.append("You are a senior Godot $version engineer. The document that follows contains the source code of a Godot $version project.\n\n")
 
         sb.append("### Hard Rules\n")
         sb.append("- Reference resources across files with `res://` paths. Never use absolute paths.\n")
@@ -652,7 +680,7 @@ object SourceMergeUtils {
 
         if (mode == "ADVANCED" || mode == "TUB_STYLE") {
             sb.append("### Engineering Guidelines\n")
-            sb.append("1. Scene graph: read the `.tscn` files above and understand the node tree, including the hierarchy of Camera3D, CharacterBody3D, Marker3D, and UI nodes.\n")
+            sb.append("1. Scene graph: read the `.tscn` files below and understand the node tree, including the hierarchy of Camera3D, CharacterBody3D, Marker3D, and UI nodes.\n")
             sb.append("2. Physics: when the code uses `PhysicsRayQueryParameters3D`, verify `collision_layer` and `collision_mask` so the ray hits the intended targets.\n")
             sb.append("3. Resource loading: use `preload()` for resources that are always needed and `load()` for dynamic resources.\n")
             sb.append("4. UI in 3D: nodes under CanvasLayer use screen coordinates. For a screen-center crosshair, use `get_viewport().get_visible_rect().size / 2`.\n")
@@ -674,7 +702,7 @@ object SourceMergeUtils {
         }
 
         sb.append("### Request\n")
-        sb.append("Read the project structure and code above, then wait for the user's development request.\n")
+        sb.append("Read the project structure and code that follow, then wait for the user's development request.\n")
 
         return sb.toString()
     }

@@ -15,8 +15,8 @@ android {
         applicationId 'com.godot.tub.gd'
         minSdk 28
         targetSdk 34
-        versionCode 183
-        versionName 'B1'
+        versionCode 184
+        versionName 'B2'
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
 
