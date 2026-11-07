@@ -717,40 +717,6 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-            ExpressiveCard(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("零拷贝写入", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.tertiaryContainer
-                            ) {
-                                Text(
-                                    "实验性",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                        Text(
-                            "流式模式下直接写原始字节，跳过解码/编码；实验性功能，遇到异常可关闭",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = settings.zeroCopy,
-                        enabled = settings.streamOutput,
-                        onCheckedChange = { onUpdateSettings { s -> s.copy(zeroCopy = it) } }
-                    )
-                }
-            }
-
             if (settings.exportMode == "FULL_EXPORT") {
                 Spacer(modifier = Modifier.height(14.dp))
                 ExpressiveCard(

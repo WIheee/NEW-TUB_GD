@@ -38,7 +38,8 @@ import androidx.compose.ui.unit.sp
 import com.wihee.code.pr.utils.AnnouncementUtils
 
 /**
- * 公告弹窗：一次展示所有未读公告（或手动打开时最新一条）。
+ * 公告弹窗：展示本次需要提示的公告（更高版本的更新公告 + 未读普通公告；
+ * 手动打开时若没有新内容，可回看最新一条）。
  * 「前往更新」跳到公告自带的 url，缺省用仓库 releases 页。
  */
 @Composable

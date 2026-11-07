@@ -95,17 +95,17 @@ app/src/main/
 ├── AndroidManifest.xml                 # MANAGE_EXTERNAL_STORAGE、FileProvider
 ├── kotlin/com/wihee/code/pr/
 │   ├── MainActivity.kt        (242)    # 单 Activity；权限申请；顶部导航状态机；Toast 错误
-│   ├── MainViewModel.kt       (423)    # AppSettings/ExportResult；提示词；扫描调度；写盘；历史
+│   ├── MainViewModel.kt       (470)    # AppSettings/ExportResult；提示词；扫描调度；写盘；历史
 │   ├── ui/theme/Theme.kt      (125)    # M3 动态取色、Expressive 圆角/字号；状态栏着色
 │   ├── ui/screens/
 │   │   ├── HomeScreen.kt      (311)    # 首页：选目录、进合并、历史弹窗、公告入口
 │   │   ├── MultiFileScreen.kt (173)    # 散文件列表、添加/移除/开始合并
 │   │   ├── ResultScreen.kt    (252)    # 统计、复制、分享、预览（流式为预览）
-│   │   ├── SettingsScreen.kt  (1057)    # 设置、规则编辑、提示词管理（最大的 UI 文件）
+│   │   ├── SettingsScreen.kt  (1023)    # 设置、规则编辑、提示词管理（最大的 UI 文件）
 │   │   ├── Components.kt      (296)    # ExpressiveCard / SegmentedControl / TabBar / Loading
 │   │   └── AnnouncementDialog.kt       # 公告弹窗（未读列表 + 前往更新）
 │   └── utils/
-│       ├── SourceMergeUtils.kt(1024)   # ★ 核心：扫描、过滤、格式化、提示词、两个 Sink
+│       ├── SourceMergeUtils.kt(999)   # ★ 核心：扫描、过滤、格式化、提示词、两个 Sink
 │       ├── AnnouncementUtils.kt        # 远程公告：拉取 Announcement.md + 解析 + 常量 URL
 │       └── NativeScanner.kt    (42)    # JNI 封装，解析 "<size>\x01<relPath>"
 ├── cpp/native_scanner.cpp     (208)    # 一级子目录 2~4 线程并行遍历，stat 回传大小
@@ -135,7 +135,7 @@ app/src/main/
 - **导出统计**：字符数、行数、token 估算 = `charCount / 4`。
 - **迁移**：旧值 `exportMode == "PROJECT_SUMMARY"` 在 `init` 里被改写成 `DIR_ONLY`——新增模式时别复用旧字符串。
 - **自定义提示词**：`SharedPreferences` 键 `customPrompts`，存 JSON 数组（`id/name/body`）；选中项用 `promptMode = "CUSTOM:<id>"` 表示。内置提示词不落盘，始终由代码生成。
-- **公告**：数据源是仓库根目录 `Announcement.md`，经 `https://raw.githubusercontent.com/WIheee/Code-pr/main/Announcement.md` 拉取（无鉴权，公开仓库才能用）。本机只持久化 `lastAnnouncementId`（同一个 SharedPreferences 文件）与内存中的 `announcements`。启动静默拉取，拉取失败静默忽略；手动入口是首页喇叭图标。
+- **公告**：数据源是仓库根目录 `Announcement.md`，经 `https://raw.githubusercontent.com/WIheee/Code-pr/main/Announcement.md` 拉取（无鉴权，公开仓库才能用）。本机持久化 `lastAnnouncementId`（同一个 SharedPreferences 文件）与内存中的 `announcements`。普通公告按 ID 只提示一次；`action: update` 且带 `version` 的公告会与当前 `versionName` 比较，目标版本更高时**每次启动都提示**，已是最新版本则忽略。启动静默拉取，拉取失败静默忽略；手动入口是首页喇叭图标。
 
 ---
 
@@ -144,9 +144,9 @@ app/src/main/
 这些是当前实现赖以正确的隐性契约，破坏它们会产生"看起来能用但内容错乱"的 bug。
 
 1. **遍历顺序必须与输出顺序一致。** `collectTextNodes`（预读）和 `buildOutput`（消费）都按 `children.sortedBy { it.sortKey }`，`sortKey = name.lowercase()`。若你改了其中一处排序，`TextPipeline.get` 会命中"顺序不符"的分支退化为同步读——不崩，但并行收益消失。目录树另用 `compareBy({ !it.isDir }, { it.sortKey })`。
-2. **流式写入的 flush 顺序。** `StreamingSink.appendFileContent` 在零拷贝写入原始字节前必须 `writer.flush()`，否则缓冲的字符会跑到文件内容之后。
+2. **流式写入统一走字符路径。** `StreamingSink.appendFileContent` 把文件读成 String 后 append，字符数/行数与内存模式一致；不要再引入字节直写分支，否则统计、预览与结果页数字会再次对不上。
 3. **`.part` 原子改名。** `scanDirectoryToFile` 先写 `<name>.part`，成功后 `renameTo`，失败则 copy+delete。不要改成直接写目标文件。
-4. **零拷贝只在有真实 `File` 时可用。** SAF-only 节点（`node.file == null`）会退回字符路径。零拷贝下字符数/行数按 UTF-8 首字节与 `0x0A` 统计——改统计方式会同时影响结果页数字。
+4. **完整导出默认并行预读。** `scanDirectoryToFile` 在 `FULL_EXPORT` 下总是创建 `TextPipeline`；节点为空时为 null，`readText` 自动回退同步读取。
 5. **二进制判定是"扩展名白名单 + 1KB NUL 嗅探"。** `isTextFile` 只对 `size in 1..102400` 嗅探；更大的未知扩展名文件直接当二进制省略。扩展名大小写统一 `lowercase()`。
 6. **过滤规则的两种匹配。** 目录按**名字**匹配（`hardExcludes.contains(dirName)` 或 `"dirName/"`），文件按**点号或无点形式**匹配（`.log` 或 `log`）。软排除只影响内容，路径仍出现在树里并输出 `[Content omitted]` 占位。
 7. **内置规则只是"种子"，不是硬编码。** `DEFAULT_HARD_DIRS` / `DEFAULT_SOFT_EXTS` 在 `MainViewModel.init()` 首次启动时并入 `hardExcludeRules` / `softExcludeRules`，随后扫描链路只读用户集合。因此用户删除内置规则会真正生效，设置页「恢复默认」再把它们并回来。首次写入用 SharedPreferences 键 `excludeDefaultsSeeded` 标记；重命名/迁移这段逻辑时要一并迁移该键。目录型规则以 `dir/` 形式存储，避免误伤同名扩展名文件。
@@ -154,7 +154,7 @@ app/src/main/
 9. **提示词版本阈值是 4.4 / 4.6 / 4.7。** 版本来自 `project.godot` 的 `config/features = PackedStringArray("4.x")`，只取 `major.minor`；识别失败为 `"Unknown"`，此时 `buildPrompt` 按 4.0 规则走，UI 会弹一次提醒。
 10. **PROJECT_CONFIG 只对文件夹扫描生效**，且只收 `.godot` / `.cfg`；多文件合并路径不实现该模式。
 11. **提示词固定在文档最前面。** MD/TXT 在标题块之后、目录树之前；XML 是 `<prompt>` 在 `<structure>` 之前。内置文案里的 "above" 已改成 "follow/below"——**改提示词时不要在开头文案里写「上文/above」**，因为源码在它后面。
-12. **公告 ID 只能递增、不能复用。** 解析器按 `## [数字] 标题` 切块，取块首连续的 `date/action/url/version` 行作元数据；模板/示例里不要出现真的数字 ID（用 `[ID]` 占位），否则会被当成真实公告。正文按纯文本渲染，不解析 Markdown。
+12. **公告 ID 只能递增、不能复用。** 解析器按 `## [数字] 标题` 切块，取块首连续的 `date/action/url/version` 行作元数据；模板/示例里不要出现真的数字 ID（用 `[ID]` 占位），否则会被当成真实公告。正文按纯文本渲染，不解析 Markdown。版本比较在 `AnnouncementUtils.isVersionNewer`：支持 `B3`/`B12` 与 `1.9.0`，beta 永远早于正式版；`dismissAnnouncements` 只推进普通公告与无版本号的 update 公告的已读 ID，带版本号的 update 公告不推进，以保证每次启动都提醒。
 
 ---
 
@@ -222,7 +222,7 @@ app/src/main/
 - [ ] 真机装包，授予「所有文件访问权限」
 - [ ] 文件夹扫描：仅目录 / 项目配置 / 完整导出 各跑一次
 - [ ] MARKDOWN / TXT / XML 各看一次结构（XML 重点看 CDATA 是否完整）
-- [ ] 流式写入 开 / 关；零拷贝 开 / 关（关时走 TextPipeline）
+- [ ] 流式写入 开 / 关（关闭时走内存拼接）
 - [ ] 多文件合并添加 3+ 个文件、移除、清空、合并
 - [ ] 结果页：复制内容、分享文件、历史记录点击（流式结果复制应能拿到全文）
 - [ ] 提示词四档切换（NONE 时文档开头不应出现提示词；提示词应在目录树之前）
@@ -232,8 +232,7 @@ app/src/main/
 
 ## 10. 已知限制 / 先别当 bug 修
 
-- 零拷贝是**实验特性**，设置页可关；异常时优先怀疑它。
-- XML 导出**始终走文本路径**（CDATA 需要转义），别"优化"成零拷贝。
+- XML 导出**始终走文本路径**（CDATA 需要转义），不要改成字节直写。
 - Markdown 代码围栏不做内容转义：源文件里出现三个反引号会提前闭合围栏、破坏渲染。
 - 只打包 `arm64-v8a`。
 - 历史记录存整段 `fullText`，大项目会让 `history.json` 明显变大（流式模式已缓解）。

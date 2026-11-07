@@ -37,7 +37,6 @@ data class AppSettings(
     val maxFileSizeKb: Int = 100,
     val showGlobalFileSize: Boolean = true,
     val streamOutput: Boolean = true,
-    val zeroCopy: Boolean = true,
     val customPrompts: List<PromptTemplate> = emptyList()
 )
 
@@ -66,6 +65,7 @@ class MainViewModel : ViewModel() {
     val announcementDialogVisible = MutableStateFlow(false)
 
     private var lastSeenAnnouncementId = 0
+    private var appVersionName: String = ""
 
     val errorMessage = MutableSharedFlow<String>()
 
@@ -73,6 +73,9 @@ class MainViewModel : ViewModel() {
         if (::prefs.isInitialized) return
         prefs = context.getSharedPreferences("CODE_PR_SETTINGS", Context.MODE_PRIVATE)
         historyFile = File(context.filesDir, "history.json")
+        appVersionName = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull().orEmpty()
         
         fun parseRuleSet(raw: String?): Set<String> =
             raw?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet() ?: emptySet()
@@ -118,7 +121,6 @@ class MainViewModel : ViewModel() {
             maxFileSizeKb = prefs.getInt("maxFileSizeKb", 100),
             showGlobalFileSize = prefs.getBoolean("showGlobalFileSize", true),
             streamOutput = prefs.getBoolean("streamOutput", true),
-            zeroCopy = prefs.getBoolean("zeroCopy", true),
             customPrompts = parsePromptTemplates(prefs.getString("customPrompts", "") ?: "")
         )
         lastSeenAnnouncementId = prefs.getInt("lastAnnouncementId", 0)
@@ -126,13 +128,16 @@ class MainViewModel : ViewModel() {
         // 历史记录放到后台读取，避免启动时主线程解析大 JSON
         viewModelScope.launch(Dispatchers.IO) { loadHistory() }
 
-        // 启动时静默检查公告：只有出现更新的 ID 才会弹窗
+        // 启动时静默检查公告：信息类只在有新 ID 时弹，版本更新只在确实有更高版本时弹
         refreshAnnouncements(silent = true)
     }
 
     /**
      * 拉取远程公告。
-     * @param silent true = 启动时静默检查（无网络/无更新都不打扰用户）；false = 用户手动点开。
+     * - 信息类公告：ID 大于本机已读 ID 时提示一次
+     * - 版本更新公告：只要目标版本高于当前版本，每次启动都提示；已是最新版本则直接忽略
+     *
+     * @param silent true = 启动时静默检查（无网络/无新内容都不打扰用户）；false = 用户手动点开。
      */
     fun refreshAnnouncements(silent: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -143,18 +148,61 @@ class MainViewModel : ViewModel() {
             }
             announcements.value = fetched
 
-            val unread = fetched.filter { it.id > lastSeenAnnouncementId }
-            if (unread.isEmpty() && silent) return@launch
+            // 当前已是最新版本时，旧版本的更新公告不再展示
+            val visible = fetched.filter { announcement ->
+                !announcement.isUpdate ||
+                    announcement.version.isBlank() ||
+                    isNewerThanCurrent(announcement.version)
+            }
+            val pending = buildPendingAnnouncements(visible)
 
-            pendingAnnouncements.value = if (unread.isNotEmpty()) unread else fetched.take(1)
+            if (pending.isEmpty()) {
+                if (silent) return@launch
+                if (visible.isEmpty()) {
+                    errorMessage.emit("当前已是最新版本，暂无新公告")
+                } else {
+                    // 手动点开时允许回看最新一条普通公告
+                    pendingAnnouncements.value = visible.take(1)
+                    announcementDialogVisible.value = true
+                }
+                return@launch
+            }
+
+            pendingAnnouncements.value = pending
             announcementDialogVisible.value = true
         }
     }
 
-    /** 关闭公告并把本机已读 ID 推到远程最大值，避免重复打扰。 */
+    private fun isNewerThanCurrent(version: String): Boolean =
+        appVersionName.isBlank() || AnnouncementUtils.isVersionNewer(version, appVersionName)
+
+    /**
+     * 启动时只挑真正需要打扰用户的内容：
+     * - 最新的一条「目标版本高于当前」的更新公告（每次启动都提示，直到更新）
+     * - 未读的普通公告，以及没有写版本号的更新公告（只提示一次）
+     */
+    private fun buildPendingAnnouncements(
+        visible: List<AnnouncementUtils.Announcement>
+    ): List<AnnouncementUtils.Announcement> {
+        val newestUpdate = visible
+            .filter { it.isUpdate && it.version.isNotBlank() && isNewerThanCurrent(it.version) }
+            .maxByOrNull { it.id }
+        val unread = visible.filter { announcement ->
+            announcement.id > lastSeenAnnouncementId &&
+                (!announcement.isUpdate || announcement.version.isBlank())
+        }
+        return buildList {
+            if (newestUpdate != null) add(newestUpdate)
+            addAll(unread)
+        }.distinctBy { it.id }.sortedByDescending { it.id }
+    }
+
+    /** 关闭公告：只推进普通公告的已读 ID；版本更新公告要保持每次启动都提醒。 */
     fun dismissAnnouncements() {
         announcementDialogVisible.value = false
-        val maxId = announcements.value.maxOfOrNull { it.id } ?: return
+        val maxId = announcements.value
+            .filter { !it.isUpdate || it.version.isBlank() }
+            .maxOfOrNull { it.id } ?: return
         if (maxId <= lastSeenAnnouncementId) return
         lastSeenAnnouncementId = maxId
         if (::prefs.isInitialized) {
@@ -177,7 +225,6 @@ class MainViewModel : ViewModel() {
                 putInt("maxFileSizeKb", newSettings.maxFileSizeKb)
                 putBoolean("showGlobalFileSize", newSettings.showGlobalFileSize)
                 putBoolean("streamOutput", newSettings.streamOutput)
-                putBoolean("zeroCopy", newSettings.zeroCopy)
                 putString("customPrompts", serializePromptTemplates(newSettings.customPrompts))
                 apply()
             }
@@ -201,7 +248,7 @@ class MainViewModel : ViewModel() {
                     val scanResult = SourceMergeUtils.scanDirectoryToFile(
                         context, uri, cfg.format, cfg.exportMode, cfg.promptMode,
                         cfg.softExcludeRules, cfg.hardExcludeRules, cfg.maxFileSizeKb, cfg.showGlobalFileSize,
-                        outFile, previewLimit = 50_000, zeroCopy = cfg.zeroCopy, customPrompts = cfg.promptBodyMap()
+                        outFile, previewLimit = 50_000, customPrompts = cfg.promptBodyMap()
                     )
                     val newResult = ExportResult(
                         fileName = outFile.name,

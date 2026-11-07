@@ -16,8 +16,8 @@ import java.net.URL
  *
  *     正文（按纯文本渲染）
  *
- * 约定：ID 单调递增，应用只会在「远程最大 ID > 本机已读 ID」时弹窗。
- * 任何网络或解析异常都返回空列表，绝不打扰用户。
+ * 约定：信息类公告按 ID 只提示一次；版本更新公告（action: update）只要目标版本
+ * 高于本机版本，每次启动都会提示，装机后自动消失。任何网络或解析异常都返回空列表。
  */
 object AnnouncementUtils {
 
@@ -100,6 +100,36 @@ object AnnouncementUtils {
                 body = body.trim()
             )
         }.sortedByDescending { it.id }
+    }
+
+    /**
+     * 判断 [remote] 是否比 [current] 新。
+     * 支持 `B3` / `B12` 这类 beta 版本与 `1.9.0` 这类正式版；beta 永远早于正式版。
+     * 任一方无法解析时保守返回 false，避免误报更新。
+     */
+    fun isVersionNewer(remote: String, current: String): Boolean {
+        if (remote.isBlank() || current.isBlank()) return false
+        val left = parseVersion(remote)
+        val right = parseVersion(current)
+        if (left.isEmpty() || right.isEmpty()) return false
+        for (i in 0 until maxOf(left.size, right.size)) {
+            val a = left.getOrElse(i) { 0 }
+            val b = right.getOrElse(i) { 0 }
+            if (a != b) return a > b
+        }
+        return false
+    }
+
+    private fun parseVersion(raw: String): List<Int> {
+        val value = raw.trim().removePrefix("v").removePrefix("V")
+        // beta：B3 / B12 / B3.0 → 前缀 0，保证 B999 < 1.0.0
+        val beta = Regex("""^[Bb](\d+)(?:\.\d+)*$""").matchEntire(value)
+        if (beta != null) {
+            return listOf(0, beta.groupValues[1].toIntOrNull() ?: return emptyList())
+        }
+        // 正式版：取所有数字段，前缀 1
+        val numbers = Regex("""\d+""").findAll(value).mapNotNull { it.value.toIntOrNull() }.toList()
+        return if (numbers.isEmpty()) emptyList() else listOf(1) + numbers
     }
 
     /**

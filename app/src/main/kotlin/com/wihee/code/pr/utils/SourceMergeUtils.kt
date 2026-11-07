@@ -10,7 +10,6 @@ import com.wihee.code.pr.SelectedFile
 import java.io.File
 import java.io.ByteArrayOutputStream
 import java.io.FileOutputStream
-import java.io.OutputStream
 import java.io.Writer
 import java.util.ArrayDeque
 import java.util.concurrent.Callable
@@ -121,7 +120,7 @@ object SourceMergeUtils {
     fun scanDirectoryToFile(
         context: Context, treeUri: Uri, outputFormat: String, exportMode: String, promptMode: String,
         softExcludes: Set<String>, hardExcludes: Set<String>, maxFileSizeKb: Int, showGlobalFileSize: Boolean,
-        outFile: File, previewLimit: Int = 200_000, zeroCopy: Boolean = true,
+        outFile: File, previewLimit: Int = 200_000,
         customPrompts: Map<String, String> = emptyMap()
     ): ScanResult {
         val (rootNode, version) = buildRootNode(context, treeUri, hardExcludes)
@@ -131,8 +130,8 @@ object SourceMergeUtils {
         // 先写临时文件，成功后改名，避免中途失败留下半个文件
         val tempFile = File(outFile.parentFile ?: File("."), outFile.name + ".part")
 
-        // 关闭零拷贝时，仍然可以把读取并行化
-        val textSource = if (!zeroCopy && exportMode == "FULL_EXPORT") {
+        // 完整导出时并行预读文本，写出阶段按顺序消费
+        val textSource = if (exportMode == "FULL_EXPORT") {
             val nodes = collectTextNodes(context, rootNode, softExcludes, maxFileSizeKb)
             if (nodes.isEmpty()) null else TextPipeline(nodes, loader = { node -> readText(context, node) })
         } else {
@@ -141,7 +140,7 @@ object SourceMergeUtils {
 
         val output = FileOutputStream(tempFile)
         val writer = output.writer(Charsets.UTF_8).buffered(128 * 1024)
-        val sink = StreamingSink(writer, output, previewLimit, zeroCopy) { node -> readText(context, node, textSource) }
+        val sink = StreamingSink(writer, previewLimit) { node -> readText(context, node, textSource) }
         try {
             buildOutput(sink, context, rootNode.name, rootNode, outputFormat, exportMode, promptMode, softExcludes, maxFileSizeKb, showGlobalFileSize, version, textSource, customPrompts)
         } finally {
@@ -936,14 +935,11 @@ object SourceMergeUtils {
     }
 
     /**
-     * 流式模式：文件内容直接以 UTF-8 原始字节写入输出流，跳过 decode/encode。
-     * 字符数按 UTF-8 首字节统计（非连续字节即为一个字符），行数按 0x0A 统计。
+     * 流式模式：内容统一以 UTF-8 字符写入，边写边统计字符/行数并截取预览。
      */
     private class StreamingSink(
         private val writer: Writer,
-        private val output: OutputStream,
         private val previewLimit: Int,
-        private val zeroCopy: Boolean,
         private val load: (FileNode) -> String
     ) : ContentSink {
         private val previewBytes = ByteArrayOutputStream(minOf(previewLimit, 8192))
@@ -990,28 +986,7 @@ object SourceMergeUtils {
         }
 
         override fun appendFileContent(node: FileNode) {
-            val file = node.file
-            if (!zeroCopy || file == null) {
-                // 关闭零拷贝，或 SAF 没有真实路径时，退回字符读取
-                append(load(node))
-                return
-            }
-            writer.flush()
-            val buffer = ByteArray(64 * 1024)
-            file.inputStream().use { input ->
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read <= 0) break
-                    for (i in 0 until read) {
-                        val b = buffer[i].toInt() and 0xFF
-                        if (b == 0x0A) newlines++
-                        if ((b and 0xC0) != 0x80) chars++
-                    }
-                    capture(buffer, read)
-                    output.write(buffer, 0, read)
-                }
-            }
-            output.flush()
+            append(load(node))
         }
 
         fun previewText(): String {
