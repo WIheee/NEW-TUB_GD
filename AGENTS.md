@@ -66,6 +66,15 @@ TUB_GD 把一整个 Godot 项目（或一堆散文件）打包成一份对 AI �
 
 **没有测试、没有 lint 配置、没有 CI。** 验证 = 编译通过 + 真机手测（见 §9）。
 
+> **构建环境坑（实测）**：在这个设备上，文件系统可能保留旧 mtime，且 `183→184`/`B1→B2` 这类修改**字节数不变**。Gradle 的增量/配置缓存按 (路径, 大小, mtime) 判断构建脚本是否变化，会直接复用旧配置，导致「改了 versionCode 但 APK 仍是旧版本」。改完版本号后执行一次 `touch app/build.gradle`，或 `./gradlew --no-configuration-cache :app:assembleRelease`；验证看 `app/build/outputs/apk/*/output-metadata.json` 与 `merged_manifests/**/AndroidManifest.xml`。
+
+### 发布签名（B2 起内置）
+
+- `app/build.gradle` 顶部读取根目录 `keystore.properties`，存在时自动为 release 变体挂 `signingConfig`；**文件不存在时跳过签名**，构建不被阻断。
+- 证书：`release-keystore.p12`（PKCS12，别名 `wihee`）。两者均被 `.gitignore` 排除，**绝不提交**；丢失后无法覆盖升级。
+- 不要为了"图省事"把口令或证书路径写死进 build.gradle，也不要把签名块改成无条件依赖——那会让没有密钥的协作者无法构建。
+- 产物是 `app/build/outputs/apk/release/app-release.apk`（已签名）；ACSIDE 额外的 `*_sign.apk` 不用。
+
 ### compileSdk 37 不要动
 
 `compileSdk 37` 是为了兼容 **ACSIDE 构建环境注入的 `acslogger.aar`**（该 aar 不在本仓库里，由设备端 IDE 在构建时注入）。因此：

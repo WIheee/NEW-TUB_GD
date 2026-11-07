@@ -107,6 +107,8 @@ cd TUB_GD
 ./gradlew :app:assembleDebug
 ```
 
+> 发布包会自动用仓库根目录的 `release-keystore.p12` 签名（口令在 `keystore.properties`）。这两个文件不入库；缺失时构建照常进行，只是产出未签名 APK。签名细节见 `docs/RELEASING.md`。
+
 > `compileSdk 37` 用于兼容 ACSIDE 注入的 `acslogger.aar`；AGP 8.13 的未测试提示可通过 `android.suppressUnsupportedCompileSdk` 处理。
 
 ### 项目结构

@@ -88,9 +88,23 @@ git push origin main --tags
 
 ## 产物与签名
 
-- 调试包：`app/build/outputs/apk/debug/app-debug.apk`
-- 发布包：`app/build/outputs/apk/release/app-release.apk`
-- 对外发布建议使用固定签名，并把 keystore 放在仓库外；不要把密码提交进版本库
+- 调试包：`app/build/outputs/apk/debug/app-debug.apk`（debug 签名）
+- 发布包：`app/build/outputs/apk/release/app-release.apk`（**由 Gradle 自动签名**）
+- 签名配置在 `app/build.gradle` 中读取仓库根目录的 `keystore.properties`；该文件与 `release-keystore.p12` 都被 `.gitignore` 排除，不会入库
+- 当前证书：别名 `wihee`、CN=WIhee、PKCS12、RSA 2048、有效期至 2054-03-25
+- **务必备份** `keystore.properties` 与 `release-keystore.p12`（放仓库外、云盘或密码管理器）。丢失后无法给已安装用户发布覆盖升级，只能让用户卸载重装
+- 不要把口令写进 README、Release Notes 或提交记录
+- 若 Gradle 报无法读取 PKCS12，可用 JDK 的 keytool 转成 JKS：
+
+```bash
+keytool -importkeystore \
+  -srckeystore release-keystore.p12 -srcstoretype PKCS12 -srcalias wihee \
+  -destkeystore release-keystore.jks -deststoretype JKS -destalias wihee
+```
+
+然后把 `keystore.properties` 的 `storeFile` 改成 `release-keystore.jks`、`storeType` 改成 `JKS`。
+
+- 使用 ACSIDE 构建时，IDE 可能还会额外生成 `app-release-unsigned_sign.apk`；**以 Gradle 产出的 `app-release.apk` 为准**，不要用 IDE 二次签名的包
 - 若启用 R8，请在发版前验证提示词生成、文件读写、JNI 扫描均正常
 
 ---
