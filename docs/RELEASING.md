@@ -1,19 +1,19 @@
 # 发版流程
 
-本文档描述 TUB_GD 的版本号规则、发布前检查清单，以及 GitHub Release 说明的模板。
+本文档描述 Code PR 的版本号规则、发布前检查清单，以及 GitHub Release 说明的模板。
 
 ---
 
 ## 版本号规则
 
 - 正式版：`1.9.0`、`2.0.0`（语义化版本）
-- 测试版：`B1`、`B2`…（当前为 beta 阶段）
+- 测试版：`B1`、`B2`、`B3`…（当前为 beta 阶段）
 - `versionCode` 每次发布必须递增，不能回退，否则无法覆盖安装
 - 版本号写在 `app/build.gradle` 的 `defaultConfig` 中：
 
 ```groovy
-versionCode 184
-versionName 'B2'
+versionCode 185
+versionName 'B3'
 ```
 
 > 应用内「关于」页读取的是系统 `PackageInfo.versionName`，无需手动同步。
@@ -33,7 +33,7 @@ versionName 'B2'
 ```
 
 - [ ] 安装到真机，走一遍核心路径：
-  - 文件夹扫描（完整导出 / TUB 提示词）
+  - 文件夹扫描（完整导出 / Code PR 提示词）
   - 多文件合并
   - 流式写入开关切换
   - 零拷贝开关切换（实验性）
@@ -43,7 +43,7 @@ versionName 'B2'
 - [ ] 打 tag 并推送：
 
 ```bash
-git tag -a B2 -m "TUB_GD B2"
+git tag -a B3 -m "Code PR B3"
 git push origin main --tags
 ```
 
@@ -54,7 +54,7 @@ git push origin main --tags
 ## Release Notes 模板
 
 ```markdown
-## TUB_GD <版本>
+## Code PR <版本>
 
 <一句话定位：这个版本主要解决什么问题>
 
@@ -81,7 +81,7 @@ git push origin main --tags
 - 当前只打包 arm64-v8a
 
 ### 升级说明
-- 直接覆盖安装即可；历史记录与设置会保留
+- 同包名版本可直接覆盖安装；B3 起包名为 `com.wihee.code.pr`，与旧包 `com.godot.tub.gd` 不互通，需卸载旧版后安装
 ```
 
 ---

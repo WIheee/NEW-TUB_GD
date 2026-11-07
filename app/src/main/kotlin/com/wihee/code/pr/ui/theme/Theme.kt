@@ -1,4 +1,4 @@
-package com.godot.tub.gd.ui.theme
+package com.wihee.code.pr.ui.theme
 
 import android.app.Activity
 import android.os.Build

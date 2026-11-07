@@ -1,4 +1,4 @@
-package com.godot.tub.gd.utils
+package com.wihee.code.pr.utils
 
 import java.net.HttpURLConnection
 import java.net.URL
@@ -11,7 +11,7 @@ import java.net.URL
  *     ## [12] 标题
  *     - date: 2026-11-07
  *     - action: update      // update | info，缺省 info
- *     - version: B2         // 可选，展示给用户的目标版本
+ *     - version: B3         // 可选，展示给用户的目标版本
  *     - url: https://...    // 可选，缺省跳到 releases 页
  *
  *     正文（按纯文本渲染）
@@ -21,9 +21,9 @@ import java.net.URL
  */
 object AnnouncementUtils {
 
-    const val REPO_URL = "https://github.com/WIheee/NEW-TUB_GD"
-    const val RELEASES_URL = "https://github.com/WIheee/NEW-TUB_GD/releases"
-    const val RAW_URL = "https://raw.githubusercontent.com/WIheee/NEW-TUB_GD/main/Announcement.md"
+    const val REPO_URL = "https://github.com/WIheee/Code-pr"
+    const val RELEASES_URL = "https://github.com/WIheee/Code-pr/releases"
+    const val RAW_URL = "https://raw.githubusercontent.com/WIheee/Code-pr/main/Announcement.md"
 
     private const val CONNECT_TIMEOUT_MS = 6000
     private const val READ_TIMEOUT_MS = 6000
@@ -61,7 +61,7 @@ object AnnouncementUtils {
             readTimeout = READ_TIMEOUT_MS
             instanceFollowRedirects = true
             setRequestProperty("Accept", "text/plain")
-            setRequestProperty("User-Agent", "TUB_GD-Android")
+            setRequestProperty("User-Agent", "CodePR-Android")
         }
         return try {
             if (connection.responseCode != HttpURLConnection.HTTP_OK) {

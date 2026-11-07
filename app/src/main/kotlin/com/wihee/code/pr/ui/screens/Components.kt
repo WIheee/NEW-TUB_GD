@@ -1,4 +1,4 @@
-package com.godot.tub.gd.ui.screens
+package com.wihee.code.pr.ui.screens
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring

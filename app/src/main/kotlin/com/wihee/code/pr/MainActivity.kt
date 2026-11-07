@@ -1,4 +1,4 @@
-package com.godot.tub.gd
+package com.wihee.code.pr
 
 import android.Manifest
 import android.content.Intent
@@ -40,15 +40,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
-import com.godot.tub.gd.ui.screens.AnnouncementDialog
-import com.godot.tub.gd.ui.screens.ExpressiveLoadingOverlay
-import com.godot.tub.gd.ui.screens.ExpressiveTabBar
-import com.godot.tub.gd.ui.screens.HomeScreen
-import com.godot.tub.gd.ui.screens.MultiFileScreen
-import com.godot.tub.gd.ui.screens.ResultScreen
-import com.godot.tub.gd.ui.screens.SettingsScreen
-import com.godot.tub.gd.ui.screens.TabItem
-import com.godot.tub.gd.ui.theme.AppTheme
+import com.wihee.code.pr.ui.screens.AnnouncementDialog
+import com.wihee.code.pr.ui.screens.ExpressiveLoadingOverlay
+import com.wihee.code.pr.ui.screens.ExpressiveTabBar
+import com.wihee.code.pr.ui.screens.HomeScreen
+import com.wihee.code.pr.ui.screens.MultiFileScreen
+import com.wihee.code.pr.ui.screens.ResultScreen
+import com.wihee.code.pr.ui.screens.SettingsScreen
+import com.wihee.code.pr.ui.screens.TabItem
+import com.wihee.code.pr.ui.theme.AppTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

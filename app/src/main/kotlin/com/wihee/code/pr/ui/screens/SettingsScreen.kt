@@ -1,4 +1,4 @@
-package com.godot.tub.gd.ui.screens
+package com.wihee.code.pr.ui.screens
 
 import android.widget.Toast
 import androidx.compose.animation.core.LinearEasing
@@ -35,10 +35,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.godot.tub.gd.AppSettings
-import com.godot.tub.gd.PromptTemplate
-import com.godot.tub.gd.utils.AnnouncementUtils
-import com.godot.tub.gd.utils.SourceMergeUtils
+import com.wihee.code.pr.AppSettings
+import com.wihee.code.pr.PromptTemplate
+import com.wihee.code.pr.utils.AnnouncementUtils
+import com.wihee.code.pr.utils.SourceMergeUtils
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -52,7 +52,7 @@ fun SettingsScreen(
     val versionName = remember(context) {
         runCatching {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull() ?: "B1"
+        }.getOrNull() ?: "B3"
     }
     val scope = rememberCoroutineScope()
 
@@ -62,8 +62,7 @@ fun SettingsScreen(
     var showPromptEditor by remember { mutableStateOf(false) }
     var editingPrompt by remember { mutableStateOf<PromptTemplate?>(null) }
     var showDefaultRulesDialog by remember { mutableStateOf(false) }
-    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
-    var ruleToDelete by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+    var ruleManagerTarget by remember { mutableStateOf<String?>(null) }
 
     val scrollState = rememberScrollState()
 
@@ -83,7 +82,7 @@ fun SettingsScreen(
     val promptModeColor = when {
         settings.promptMode == "GENERAL" -> MaterialTheme.colorScheme.secondary
         settings.promptMode == "ADVANCED" -> MaterialTheme.colorScheme.tertiary
-        settings.promptMode == "TUB_STYLE" -> MaterialTheme.colorScheme.error
+        settings.promptMode == "CODE_PR_STYLE" -> MaterialTheme.colorScheme.error
         activeCustomPrompt != null -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -92,7 +91,7 @@ fun SettingsScreen(
         settings.promptMode == "NONE" -> "不注入（纯净模式）"
         settings.promptMode == "GENERAL" -> "通用开发"
         settings.promptMode == "ADVANCED" -> "进阶开发"
-        settings.promptMode == "TUB_STYLE" -> "TUB 同款"
+        settings.promptMode == "CODE_PR_STYLE" -> "Code PR 同款"
         activeCustomPrompt != null -> "自定义 · ${activeCustomPrompt.name}"
         else -> "未选择"
     }
@@ -126,23 +125,80 @@ fun SettingsScreen(
         )
     }
 
-    if (showDeleteConfirmDialog && ruleToDelete != null) {
-        val (rule, isHard) = ruleToDelete!!
+    if (ruleManagerTarget != null) {
+        val isHard = ruleManagerTarget == "hard"
+        val rules = if (isHard) settings.hardExcludeRules else settings.softExcludeRules
         AlertDialog(
-            onDismissRequest = { showDeleteConfirmDialog = false },
+            onDismissRequest = { ruleManagerTarget = null },
             shape = RoundedCornerShape(32.dp),
-            title = { Text("确认删除", style = MaterialTheme.typography.headlineSmall) },
-            text = { Text("是否删除${if (isHard) "重排除" else "软排除"}规则：\n$rule ？") },
+            title = {
+                Text(
+                    if (isHard) "重排除规则" else "软排除规则",
+                    style = MaterialTheme.typography.headlineSmall
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 440.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        "共 ${rules.size} 条。点右侧 × 立即删除；内置默认规则删除后可用「恢复默认」找回。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    if (rules.isEmpty()) {
+                        Text(
+                            "暂无规则",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        rules.sortedBy { it.lowercase() }.forEach { rule ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    rule,
+                                    modifier = Modifier.weight(1f),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                IconButton(
+                                    onClick = {
+                                        onUpdateSettings {
+                                            if (isHard) it.copy(hardExcludeRules = it.hardExcludeRules - rule)
+                                            else it.copy(softExcludeRules = it.softExcludeRules - rule)
+                                        }
+                                        Toast.makeText(context, "已删除：$rule", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.size(36.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "删除 $rule",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                        }
+                    }
+                }
+            },
             confirmButton = {
-                TextButton(onClick = {
-                    if (isHard) onUpdateSettings { it.copy(hardExcludeRules = it.hardExcludeRules - rule) }
-                    else onUpdateSettings { it.copy(softExcludeRules = it.softExcludeRules - rule) }
-                    showDeleteConfirmDialog = false
-                    ruleToDelete = null
-                }) { Text("删除", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold) }
+                TextButton(onClick = { ruleManagerTarget = null }) { Text("完成") }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteConfirmDialog = false; ruleToDelete = null }) { Text("取消") }
+                TextButton(onClick = {
+                    ruleManagerTarget = null
+                    showAddRuleDialog = true
+                }) { Text("添加规则") }
             }
         )
     }
@@ -151,18 +207,18 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { showDefaultRulesDialog = false },
             shape = RoundedCornerShape(32.dp),
-            title = { Text("系统默认规则", style = MaterialTheme.typography.headlineSmall) },
+            title = { Text("内置默认规则", style = MaterialTheme.typography.headlineSmall) },
             text = {
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     Text(
-                        "为了确保扫描速度与 AI 纯净度，系统内置了以下不可修改的规则：",
+                        "这些规则首次启动时会自动并入下方列表，和自定义规则一样可以随时删除。误删后点“恢复默认”即可找回。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        "底层重排除（连路径都不显示）",
+                        "默认重排除（连路径都不显示）",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.error
                     )
@@ -190,7 +246,21 @@ fun SettingsScreen(
                     )
                 }
             },
-            confirmButton = { TextButton(onClick = { showDefaultRulesDialog = false }) { Text("我知道了") } }
+            confirmButton = {
+                TextButton(onClick = {
+                    onUpdateSettings {
+                        it.copy(
+                            softExcludeRules = it.softExcludeRules + SourceMergeUtils.DEFAULT_SOFT_EXTS,
+                            hardExcludeRules = it.hardExcludeRules + SourceMergeUtils.DEFAULT_HARD_DIRS.map { dir -> "$dir/" }
+                        )
+                    }
+                    showDefaultRulesDialog = false
+                    Toast.makeText(context, "已恢复默认排除规则", Toast.LENGTH_SHORT).show()
+                }) { Text("恢复默认", fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDefaultRulesDialog = false }) { Text("关闭") }
+            }
         )
     }
 
@@ -265,8 +335,8 @@ fun SettingsScreen(
                         val isDirectory = rule.endsWith("/")
                         val cleanRule = if (isDirectory) rule.dropLast(1) else rule
 
-                        // 简化非法字符校验：直接用字符串包含，避开正则转义地狱
-                        val illegalChars = "\\:*?\"<>|"
+                        // 逗号是规则的持久化分隔符，必须禁止；其余为文件系统非法字符
+                        val illegalChars = "\\:*?\"<>|,，"
 
                         if (cleanRule.isEmpty()) {
                             Toast.makeText(context, "规则不能仅为斜杠", Toast.LENGTH_SHORT).show()
@@ -277,8 +347,9 @@ fun SettingsScreen(
                         } else if (cleanRule.contains(" ")) {
                             Toast.makeText(context, "规则不能包含空格", Toast.LENGTH_SHORT).show()
                         } else {
-                            val allHard = SourceMergeUtils.DEFAULT_HARD_DIRS + settings.hardExcludeRules
-                            val allSoft = SourceMergeUtils.DEFAULT_SOFT_EXTS + settings.softExcludeRules
+                            // 默认规则已经并入用户列表，这里只查当前列表，保证删除后还能重新添加
+                            val allHard = settings.hardExcludeRules
+                            val allSoft = settings.softExcludeRules
 
                             val existsInHard = if (isDirectory) allHard.any { it.removeSuffix("/") == cleanRule } else allHard.contains(cleanRule)
                             val existsInSoft = if (isDirectory) allSoft.any { it.removeSuffix("/") == cleanRule } else allSoft.contains(cleanRule)
@@ -305,7 +376,7 @@ fun SettingsScreen(
             PromptModeOption("NONE", "不注入", "仅保留项目结构，适合让 AI 自己分析或你完全自定义提示词。", MaterialTheme.colorScheme.onSurfaceVariant),
             PromptModeOption("GENERAL", "通用开发", "扩展性极高，仅注入基本语法标准，适合简单问答和自由发挥。", MaterialTheme.colorScheme.secondary),
             PromptModeOption("ADVANCED", "进阶开发", "如同高级工程师全方位重构，并针对 3D 场景与物理深度优化。", MaterialTheme.colorScheme.tertiary),
-            PromptModeOption("TUB_STYLE", "TUB 同款", "在进阶基础上强制 AI 生成 Python 一键构建脚本，效率翻三倍。", MaterialTheme.colorScheme.error)
+            PromptModeOption("CODE_PR_STYLE", "Code PR 同款", "在进阶基础上强制 AI 生成 Python 一键构建脚本，效率翻三倍。", MaterialTheme.colorScheme.error)
         )
 
         AlertDialog(
@@ -754,14 +825,14 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        Icons.Default.Lock,
+                        Icons.Default.Info,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        "系统默认规则",
+                        "内置默认规则 · 可删除、可恢复",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -779,91 +850,83 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text("软排除 · 保留路径，省略内容", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                if (settings.softExcludeRules.isEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { ruleManagerTarget = "soft" }
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        "暂无自定义软排除",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp)
+                        "${settings.softExcludeRules.size} 条规则",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-                } else {
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        settings.softExcludeRules.forEach { ext ->
-                            InputChip(
-                                selected = false,
-                                onClick = { ruleToDelete = Pair(ext, false); showDeleteConfirmDialog = true },
-                                shape = CircleShape,
-                                label = { Text(ext, fontSize = 12.sp) },
-                                colors = InputChipDefaults.inputChipColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    labelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                ),
-                                trailingIcon = {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "删除",
-                                        modifier = Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
-                                    )
-                                }
-                            )
-                        }
-                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text("管理", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 Text("重排除 · 彻底隐藏", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error)
-                if (settings.hardExcludeRules.isEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { ruleManagerTarget = "hard" }
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        "暂无自定义重排除",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp)
+                        "${settings.hardExcludeRules.size} 条规则",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-                } else {
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        settings.hardExcludeRules.forEach { ext ->
-                            InputChip(
-                                selected = false,
-                                onClick = { ruleToDelete = Pair(ext, true); showDeleteConfirmDialog = true },
-                                shape = CircleShape,
-                                label = { Text(ext, fontSize = 12.sp) },
-                                colors = InputChipDefaults.inputChipColors(
-                                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                                    labelColor = MaterialTheme.colorScheme.onErrorContainer
-                                ),
-                                trailingIcon = {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "删除",
-                                        modifier = Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.onErrorContainer
-                                    )
-                                }
-                            )
-                        }
-                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    Text("管理", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error)
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
+
+                Text(
+                    "所有规则（含内置默认）都可以自由删除，并可随时重新添加。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                OutlinedButton(
-                    onClick = { showAddRuleDialog = true },
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    shape = CircleShape
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("添加新的排除规则", style = MaterialTheme.typography.labelLarge)
+                    OutlinedButton(
+                        onClick = { showAddRuleDialog = true },
+                        modifier = Modifier.weight(1f).height(50.dp),
+                        shape = CircleShape
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("添加规则", style = MaterialTheme.typography.labelLarge)
+                    }
+                    OutlinedButton(
+                        onClick = { showDefaultRulesDialog = true },
+                        modifier = Modifier.weight(1f).height(50.dp),
+                        shape = CircleShape
+                    ) {
+                        Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("恢复默认", style = MaterialTheme.typography.labelLarge)
+                    }
                 }
             }
 
@@ -884,13 +947,13 @@ fun SettingsScreen(
                     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                         BrandMark(size = 64, corner = 22, fontSize = 22)
                         Spacer(modifier = Modifier.height(14.dp))
-                        Text("Godot 整合工具", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+                        Text("Code PR", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
                         Text("v$versionName", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(modifier = Modifier.height(14.dp))
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                         Spacer(modifier = Modifier.height(14.dp))
                         Text(
-                            "by TUB-R · 点击访问 GitHub 仓库",
+                            "by WIhee · 点击访问 GitHub 仓库",
                             color = MaterialTheme.colorScheme.primary,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold

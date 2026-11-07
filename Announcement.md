@@ -1,4 +1,4 @@
-# TUB_GD 公告
+# Code PR 公告
 
 本文件是应用内「公告」的数据源。直接改这个文件并提交到 `main` 分支即可生效，不需要发新版本。
 
@@ -29,8 +29,8 @@
 ## [ID] 标题写在这里
 - date: 2026-01-01
 - action: update
-- version: B2
-- url: https://github.com/WIheee/NEW-TUB_GD/releases
+- version: B3
+- url: https://github.com/WIheee/Code-pr/releases
 
 第一段正文。
 
@@ -61,3 +61,18 @@
 - 新增自定义提示词：内置模板可复制修改，也可以从零新建
 - 新增应用内公告，重要通知会出现在这里
 - 哈基米哈基米哈基米哈基米哈基米叮咚鸡叮咚鸡
+
+## [3] Code PR B3 已发布
+- date: 2026-11-07
+- action: update
+- version: B3
+- url: https://github.com/WIheee/Code-pr/releases
+
+本次是品牌与包名升级：
+
+- 应用更名为 Code PR
+- 排除规则可以自由添加、删除，并支持一键恢复默认
+- 包名改为 com.wihee.code.pr
+
+注意：由于包名变更，B3 不能覆盖安装旧版。
+请先备份需要的导出文件，再卸载旧版后安装 B3。

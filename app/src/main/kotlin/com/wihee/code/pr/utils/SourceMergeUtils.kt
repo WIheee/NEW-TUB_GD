@@ -1,4 +1,4 @@
-package com.godot.tub.gd.utils
+package com.wihee.code.pr.utils
 
 import android.content.Context
 import android.net.Uri
@@ -6,7 +6,7 @@ import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
-import com.godot.tub.gd.SelectedFile
+import com.wihee.code.pr.SelectedFile
 import java.io.File
 import java.io.ByteArrayOutputStream
 import java.io.FileOutputStream
@@ -183,7 +183,7 @@ object SourceMergeUtils {
             doc.listFiles().forEach { child ->
                 if (child.isDirectory) {
                     val dirName = child.name ?: ""
-                    val isHardDir = DEFAULT_HARD_DIRS.contains(dirName) || hardExcludes.contains(dirName) || hardExcludes.contains("$dirName/")
+                    val isHardDir = hardExcludes.contains(dirName) || hardExcludes.contains("$dirName/")
                     if (!isHardDir) {
                         val childNode = FileNode(dirName, true, child.uri, 0, child)
                         node.children.add(childNode)
@@ -640,7 +640,7 @@ object SourceMergeUtils {
 
     /**
      * 生成注入到文档开头的提示词。
-     * - 内置模式 GENERAL / ADVANCED / TUB_STYLE：按 Godot 版本注入差异化规则
+     * - 内置模式 GENERAL / ADVANCED / CODE_PR_STYLE：按 Godot 版本注入差异化规则
      * - 自定义模式 "CUSTOM:<id>"：正文取自 [customPrompts]，支持 {{version}} 占位符
      */
     fun buildPrompt(mode: String, version: String, customPrompts: Map<String, String> = emptyMap()): String {
@@ -678,7 +678,7 @@ object SourceMergeUtils {
         }
         sb.append("\n")
 
-        if (mode == "ADVANCED" || mode == "TUB_STYLE") {
+        if (mode == "ADVANCED" || mode == "CODE_PR_STYLE") {
             sb.append("### Engineering Guidelines\n")
             sb.append("1. Scene graph: read the `.tscn` files below and understand the node tree, including the hierarchy of Camera3D, CharacterBody3D, Marker3D, and UI nodes.\n")
             sb.append("2. Physics: when the code uses `PhysicsRayQueryParameters3D`, verify `collision_layer` and `collision_mask` so the ray hits the intended targets.\n")
@@ -687,7 +687,7 @@ object SourceMergeUtils {
             sb.append("5. Decoupling: prefer signals and groups over hard-coded node paths such as `get_node(\"../../Player\")`. Use `get_tree().get_nodes_in_group(\"player_team\")` where appropriate.\n\n")
         }
 
-        if (mode == "TUB_STYLE") {
+        if (mode == "CODE_PR_STYLE") {
             sb.append("### Automated Patch Workflow (highest priority)\n")
             sb.append("To modify the project, output a single standalone Python script (for example `patch.py`) that can be run from the project root.\n")
             sb.append("Requirements:\n")
@@ -744,7 +744,7 @@ object SourceMergeUtils {
 
     private fun buildNativeRoot(root: File, hardExcludes: Set<String>): Pair<FileNode, String>? {
         if (!root.isDirectory || !root.canRead()) return null
-        val skipDirs = DEFAULT_HARD_DIRS + hardExcludes.map { it.removeSuffix("/") }
+        val skipDirs = hardExcludes.map { it.removeSuffix("/") }.toSet()
         val entries = NativeScanner.listFiles(root, skipDirs) ?: return null
         if (entries.isEmpty()) return null
 
@@ -795,7 +795,7 @@ object SourceMergeUtils {
 
         private val executor = Executors.newFixedThreadPool(
             Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
-        ) { runnable -> Thread(runnable, "tub-pipeline").apply { isDaemon = true } }
+        ) { runnable -> Thread(runnable, "codepr-pipeline").apply { isDaemon = true } }
 
         private val pending = ArrayDeque<Pending>()
         private var nextToSchedule = 0

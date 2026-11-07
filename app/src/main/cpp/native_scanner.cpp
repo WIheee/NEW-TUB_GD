@@ -114,7 +114,7 @@ void listRootLevel(const std::string& root,
 }  // namespace
 
 extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_godot_tub_gd_utils_NativeScanner_nativeListRelativePaths(
+Java_com_wihee_code_pr_utils_NativeScanner_nativeListRelativePaths(
         JNIEnv* env, jobject /* thiz */, jstring rootPath, jobjectArray excludes) {
     if (rootPath == nullptr) {
         return nullptr;

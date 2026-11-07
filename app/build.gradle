@@ -15,17 +15,17 @@ if (hasReleaseKeystore) {
 }
 
 android {
-    namespace = 'com.godot.tub.gd'
+    namespace = 'com.wihee.code.pr'
     compileSdk 37
     buildToolsVersion '37.0.0'
     ndkVersion = '30.0.15729638'
 
     defaultConfig {
-        applicationId 'com.godot.tub.gd'
+        applicationId 'com.wihee.code.pr'
         minSdk 28
         targetSdk 34
-        versionCode 184
-        versionName 'B2'
+        versionCode 185
+        versionName 'B3'
 
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
 

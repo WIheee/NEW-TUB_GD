@@ -1,4 +1,4 @@
-package com.godot.tub.gd.ui.screens
+package com.wihee.code.pr.ui.screens
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -17,8 +17,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.godot.tub.gd.AppSettings
-import com.godot.tub.gd.SelectedFile
+import com.wihee.code.pr.AppSettings
+import com.wihee.code.pr.SelectedFile
 
 @Composable
 fun MultiFileScreen(

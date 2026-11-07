@@ -23,6 +23,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "TUB_GD"
+rootProject.name = "Code PR"
 
 include(":app")

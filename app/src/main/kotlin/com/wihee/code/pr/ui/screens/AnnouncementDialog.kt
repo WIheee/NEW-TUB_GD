@@ -1,4 +1,4 @@
-package com.godot.tub.gd.ui.screens
+package com.wihee.code.pr.ui.screens
 
 import android.content.Context
 import android.content.Intent
@@ -35,7 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.godot.tub.gd.utils.AnnouncementUtils
+import com.wihee.code.pr.utils.AnnouncementUtils
 
 /**
  * 公告弹窗：一次展示所有未读公告（或手动打开时最新一条）。

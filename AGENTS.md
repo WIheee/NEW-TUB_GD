@@ -1,8 +1,8 @@
-# AGENTS.md — TUB_GD 编码代理工作指南
+# AGENTS.md — Code PR 编码代理工作指南
 
 > 面向：接手本仓库的 AI 编码代理（以及人类协作者）。
 > 目标：让你在 **不读完全部源码** 的前提下，知道项目是什么、代码在哪、改动会牵动什么、哪些地方一碰就坏。
-> 事实基准：`B2`（versionCode 184）。若版本号已变，先看 `CHANGELOG.md` 与 `app/build.gradle`。
+> 事实基准：`B3`（versionCode 185）。若版本号已变，先看 `CHANGELOG.md` 与 `app/build.gradle`。
 
 ---
 
@@ -11,19 +11,19 @@
 1. **这是一个单模块 Android App**（Kotlin + Jetpack Compose），不是库、没有后端、没有测试，只有一个 Activity。
 2. **唯一的核心逻辑在 `SourceMergeUtils.kt`**：扫描目录 → 过滤 → 拼成一份超长 Markdown/TXT/XML → 写盘。UI 只是它的外壳。
 3. **构建要真机/真环境**（JDK 21 + NDK 30 + CMake 4.1.2），产物只打 `arm64-v8a`。本仓库没有 CI，**也没有任何单元测试**——不要执行 `./gradlew test` 期待结果。
-4. **改功能先找"三处"**：设置项要同时动 `AppSettings` / `MainViewModel` 持久化 / `SettingsScreen`；导出格式要同时动 `buildOutput` 的三个分支；过滤规则要同时动默认集合与匹配逻辑。
+4. **改功能先找"三处"**：设置项要同时动 `AppSettings` / `MainViewModel` 持久化 / `SettingsScreen`；导出格式要同时动 `buildOutput` 的三个分支；过滤规则要同时动 `DEFAULT_*` 种子集合、首次启动播种逻辑与匹配逻辑。
 5. **UI 文案用中文，导出文档与 AI 提示词用英文**。这条不要混。
 
 ---
 
 ## 1. 项目是什么
 
-TUB_GD 把一整个 Godot 项目（或一堆散文件）打包成一份对 AI 友好的长文档（Markdown / TXT / XML），并在**文档开头**注入一段任务提示词（内置英文模板或用户自定义），供网页版大模型直接消费。
+Code PR 把一整个 Godot 项目（或一堆散文件）打包成一份对 AI 友好的长文档（Markdown / TXT / XML），并在**文档开头**注入一段任务提示词（内置英文模板或用户自定义），供网页版大模型直接消费。
 
-- 包名 / namespace：`com.godot.tub.gd`
-- 应用名：`TUB_GD`
+- 包名 / namespace：`com.wihee.code.pr`
+- 应用名：`Code PR`
 - 源码规模：约 4.4k 行（14 个 Kotlin/C++ 文件），单模块 `:app`
-- 远端：`git@github.com:WIheee/NEW-TUB_GD.git`；README、设置页「关于」与内置公告地址统一指向 `https://github.com/WIheee/NEW-TUB_GD`
+- 远端：`git@github.com:WIheee/Code-pr.git`；README、设置页「关于」与内置公告地址统一指向 `https://github.com/WIheee/Code-pr`
 
 ### 用户可见的核心流程
 
@@ -54,7 +54,7 @@ TUB_GD 把一整个 Godot 项目（或一堆散文件）打包成一份对 AI �
 | Compose BOM | 2026.01.01 | Material3 1.4.0、icons-extended 1.7.8 |
 | compileSdk / targetSdk / minSdk | 37 / 34 / 28 | 37 是硬要求，见下 |
 | Build Tools | 37.0.0 | |
-| NDK / CMake | 30.0.15729638 / 4.1.2 | 原生库名 `tubgd` |
+| NDK / CMake | 30.0.15729638 / 4.1.2 | 原生库名 `codepr` |
 | ABI | 仅 `arm64-v8a` | 想支持 x86 模拟器需自行加 `abiFilters` |
 
 ```bash
@@ -66,7 +66,7 @@ TUB_GD 把一整个 Godot 项目（或一堆散文件）打包成一份对 AI �
 
 **没有测试、没有 lint 配置、没有 CI。** 验证 = 编译通过 + 真机手测（见 §9）。
 
-> **构建环境坑（实测）**：在这个设备上，文件系统可能保留旧 mtime，且 `183→184`/`B1→B2` 这类修改**字节数不变**。Gradle 的增量/配置缓存按 (路径, 大小, mtime) 判断构建脚本是否变化，会直接复用旧配置，导致「改了 versionCode 但 APK 仍是旧版本」。改完版本号后执行一次 `touch app/build.gradle`，或 `./gradlew --no-configuration-cache :app:assembleRelease`；验证看 `app/build/outputs/apk/*/output-metadata.json` 与 `merged_manifests/**/AndroidManifest.xml`。
+> **构建环境坑（实测）**：在这个设备上，文件系统可能保留旧 mtime，且 `184→185`/`B2→B3` 这类修改**字节数不变**。Gradle 的增量/配置缓存按 (路径, 大小, mtime) 判断构建脚本是否变化，会直接复用旧配置，导致「改了 versionCode 但 APK 仍是旧版本」。改完版本号后执行一次 `touch app/build.gradle`，或 `./gradlew --no-configuration-cache :app:assembleRelease`；验证看 `app/build/outputs/apk/*/output-metadata.json` 与 `merged_manifests/**/AndroidManifest.xml`。
 
 ### 发布签名（B2 起内置）
 
@@ -93,15 +93,15 @@ TUB_GD 把一整个 Godot 项目（或一堆散文件）打包成一份对 AI �
 ```
 app/src/main/
 ├── AndroidManifest.xml                 # MANAGE_EXTERNAL_STORAGE、FileProvider
-├── kotlin/com/godot/tub/gd/
+├── kotlin/com/wihee/code/pr/
 │   ├── MainActivity.kt        (242)    # 单 Activity；权限申请；顶部导航状态机；Toast 错误
-│   ├── MainViewModel.kt       (405)    # AppSettings/ExportResult；提示词；扫描调度；写盘；历史
+│   ├── MainViewModel.kt       (423)    # AppSettings/ExportResult；提示词；扫描调度；写盘；历史
 │   ├── ui/theme/Theme.kt      (125)    # M3 动态取色、Expressive 圆角/字号；状态栏着色
 │   ├── ui/screens/
 │   │   ├── HomeScreen.kt      (311)    # 首页：选目录、进合并、历史弹窗、公告入口
 │   │   ├── MultiFileScreen.kt (173)    # 散文件列表、添加/移除/开始合并
 │   │   ├── ResultScreen.kt    (252)    # 统计、复制、分享、预览（流式为预览）
-│   │   ├── SettingsScreen.kt  (994)    # 设置、规则编辑、提示词管理（最大的 UI 文件）
+│   │   ├── SettingsScreen.kt  (1057)    # 设置、规则编辑、提示词管理（最大的 UI 文件）
 │   │   ├── Components.kt      (296)    # ExpressiveCard / SegmentedControl / TabBar / Loading
 │   │   └── AnnouncementDialog.kt       # 公告弹窗（未读列表 + 前往更新）
 │   └── utils/
@@ -109,7 +109,7 @@ app/src/main/
 │       ├── AnnouncementUtils.kt        # 远程公告：拉取 Announcement.md + 解析 + 常量 URL
 │       └── NativeScanner.kt    (42)    # JNI 封装，解析 "<size>\x01<relPath>"
 ├── cpp/native_scanner.cpp     (208)    # 一级子目录 2~4 线程并行遍历，stat 回传大小
-└── cpp/CMakeLists.txt         (8)      # tubgd SHARED，C++17，-O2
+└── cpp/CMakeLists.txt         (8)      # codepr SHARED，C++17，-O2
 ```
 
 ### `SourceMergeUtils` 内部分层
@@ -121,7 +121,7 @@ app/src/main/
 | 建树 | `buildRootNode` → `buildNativeRoot` / `buildSafRoot` | 原生优先，失败回落 SAF |
 | 路径 | `resolveTreeUriToFile` | 只处理 primary/home/SD 卷，其它 provider 返回 null |
 | 输出 | `buildOutput`（分支：PROJECT_CONFIG / XML / MD+TXT） | 所有格式的唯一汇集点 |
-| 提示词 | `buildPrompt(mode, version, customPrompts)` | NONE / GENERAL / ADVANCED / TUB_STYLE / `CUSTOM:<id>` |
+| 提示词 | `buildPrompt(mode, version, customPrompts)` | NONE / GENERAL / ADVANCED / CODE_PR_STYLE / `CUSTOM:<id>` |
 | 并行读 | `TextPipeline` + `collectTextNodes` | 窗口 6 文件 / 8MB |
 | 写出 | `ContentSink` → `StringBuilderSink` / `StreamingSink` | 流式先写 `.part` 再改名 |
 
@@ -129,13 +129,13 @@ app/src/main/
 
 ## 4. 数据与持久化
 
-- **设置**：`SharedPreferences("TUB_GD_SETTINGS")`，键名与 `AppSettings` 字段同名；软/硬排除规则以 `joinToString(",")` 存字符串。
+- **设置**：`SharedPreferences("CODE_PR_SETTINGS")`，键名与 `AppSettings` 字段同名；软/硬排除规则以 `joinToString(",")` 存字符串。
 - **历史**：`filesDir/history.json`（org.json 手写），最多 20 条，**整段 `fullText` 也存**；流式导出只存 5 万字符预览（`streamed=true`，复制时再从磁盘读全文）。
 - **输出文件**：默认 `/storage/emulated/0/Documents/`，命名 `<根文件夹名>_source.<md|txt|xml>`；多文件为 `MultiFiles_source.*`。
 - **导出统计**：字符数、行数、token 估算 = `charCount / 4`。
 - **迁移**：旧值 `exportMode == "PROJECT_SUMMARY"` 在 `init` 里被改写成 `DIR_ONLY`——新增模式时别复用旧字符串。
 - **自定义提示词**：`SharedPreferences` 键 `customPrompts`，存 JSON 数组（`id/name/body`）；选中项用 `promptMode = "CUSTOM:<id>"` 表示。内置提示词不落盘，始终由代码生成。
-- **公告**：数据源是仓库根目录 `Announcement.md`，经 `https://raw.githubusercontent.com/WIheee/NEW-TUB_GD/main/Announcement.md` 拉取（无鉴权，公开仓库才能用）。本机只持久化 `lastAnnouncementId`（同一个 SharedPreferences 文件）与内存中的 `announcements`。启动静默拉取，拉取失败静默忽略；手动入口是首页喇叭图标。
+- **公告**：数据源是仓库根目录 `Announcement.md`，经 `https://raw.githubusercontent.com/WIheee/Code-pr/main/Announcement.md` 拉取（无鉴权，公开仓库才能用）。本机只持久化 `lastAnnouncementId`（同一个 SharedPreferences 文件）与内存中的 `announcements`。启动静默拉取，拉取失败静默忽略；手动入口是首页喇叭图标。
 
 ---
 
@@ -149,7 +149,7 @@ app/src/main/
 4. **零拷贝只在有真实 `File` 时可用。** SAF-only 节点（`node.file == null`）会退回字符路径。零拷贝下字符数/行数按 UTF-8 首字节与 `0x0A` 统计——改统计方式会同时影响结果页数字。
 5. **二进制判定是"扩展名白名单 + 1KB NUL 嗅探"。** `isTextFile` 只对 `size in 1..102400` 嗅探；更大的未知扩展名文件直接当二进制省略。扩展名大小写统一 `lowercase()`。
 6. **过滤规则的两种匹配。** 目录按**名字**匹配（`hardExcludes.contains(dirName)` 或 `"dirName/"`），文件按**点号或无点形式**匹配（`.log` 或 `log`）。软排除只影响内容，路径仍出现在树里并输出 `[Content omitted]` 占位。
-7. **默认软排除列表当前"只展示不生效"。** `DEFAULT_SOFT_EXTS` 仅用于设置页说明弹窗与"重复规则"检测，扫描链路只消费用户自定义的 `softExcludeRules`。二进制文件靠 §5.5 被省略，观感相近。**若要让默认软排除真正生效，需在 `scanDirectory` / `scanDirectoryToFile` / `processMultipleFiles` 里合并该集合**——这是已知的语义缺口，不是 bug 修复的意外。
+7. **内置规则只是"种子"，不是硬编码。** `DEFAULT_HARD_DIRS` / `DEFAULT_SOFT_EXTS` 在 `MainViewModel.init()` 首次启动时并入 `hardExcludeRules` / `softExcludeRules`，随后扫描链路只读用户集合。因此用户删除内置规则会真正生效，设置页「恢复默认」再把它们并回来。首次写入用 SharedPreferences 键 `excludeDefaultsSeeded` 标记；重命名/迁移这段逻辑时要一并迁移该键。目录型规则以 `dir/` 形式存储，避免误伤同名扩展名文件。
 8. **XML 必须转义 CDATA。** 所有写内容的地方都做了 `replace("]]>", "]]]]><![CDATA[>")`。新增 XML 分支时照做，否则导出文件结构损坏。
 9. **提示词版本阈值是 4.4 / 4.6 / 4.7。** 版本来自 `project.godot` 的 `config/features = PackedStringArray("4.x")`，只取 `major.minor`；识别失败为 `"Unknown"`，此时 `buildPrompt` 按 4.0 规则走，UI 会弹一次提醒。
 10. **PROJECT_CONFIG 只对文件夹扫描生效**，且只收 `.godot` / `.cfg`；多文件合并路径不实现该模式。
@@ -176,14 +176,14 @@ app/src/main/
 
 ### 调整过滤
 
-- 系统级目录 → `DEFAULT_HARD_DIRS`（会同时被原生与 SAF 两条路径使用）。
-- 默认软排除 → `DEFAULT_SOFT_EXTS`（记得 §5.7 的缺口）。
+- 内置默认规则 → `DEFAULT_HARD_DIRS` / `DEFAULT_SOFT_EXTS`。它们只是首次启动的种子，扫描链路不再直接读取；改这里只影响新安装用户和「恢复默认」。
+- 目录型规则统一存成 `dir/`，文件/扩展名规则存成 `.log` 或 `log`；匹配逻辑见 §5.6。
 - 扩展名识别 → `TEXT_EXTS` 与 `getLang`。
-- 规则编辑 UI 在 `SettingsScreen` 的"添加过滤规则"弹窗，校验逻辑在 `SettingsScreen` 约 260~290 行。
+- 规则编辑 UI 在 `SettingsScreen` 的“添加过滤规则”弹窗；查看与删除走“管理”弹窗（软/重排除各一个入口）；「恢复默认」按钮打开内置规则说明并支持一键并回。
 
 ### 改提示词
 
-内置文案只动 `buildPrompt`。它必须：全英文、无 emoji、无硬编码绝对路径、TUB_STYLE 必须强制"输出可一键运行的 Python 补丁脚本"。新增版本规则请加 `if (v >= 4.xf)` 分支，不要写死到通用段。
+内置文案只动 `buildPrompt`。它必须：全英文、无 emoji、无硬编码绝对路径、CODE_PR_STYLE 必须强制"输出可一键运行的 Python 补丁脚本"。新增版本规则请加 `if (v >= 4.xf)` 分支，不要写死到通用段。
 
 用户自定义提示词走 `CUSTOM:<id>` 分支：正文从 `customPrompts` 取，支持 `{{version}}` 占位符；改选择/新增/编辑的 UI 在 `SettingsScreen` 的`AI 提示词`弹窗与 `PromptEditorDialog`，数据在 `AppSettings.customPrompts` + prefs JSON。
 
@@ -240,13 +240,14 @@ app/src/main/
 - `getDisplayNameAndPath` 对 `document:` 形式的 URI 会退化为只显示文件名（多文件合并的路径列可能不完整）。
 - `libs.versions.toml` 里 `appcompat` / `material` / `constraintlayout` / `navigation-compose` 仍声明但**已不被依赖**（历史遗留，B1 刻意移除）；不要因为"看到声明"就加回 build.gradle。
 - `MainActivity` 用 `MANAGE_EXTERNAL_STORAGE` 全盘访问；如果未来上架需要改 MediaStore，这是结构性改动。
+- B3 起包名为 `com.wihee.code.pr`，系统会把它当**全新应用**：旧包 `com.godot.tub.gd` 的设置、历史与自定义提示词不会自动迁移。需要保留时请先手动备份/导出。
 
 ---
 
 ## 11. 版本与发布
 
-- 版本号只写在 `app/build.gradle` 的 `defaultConfig`（当前 `versionCode 184` / `versionName 'B2'`）；设置页"关于"读系统 `PackageInfo`，无需同步。
-- beta 阶段用 `B1`、`B2`…；正式版回到语义化版本。
+- 版本号只写在 `app/build.gradle` 的 `defaultConfig`（当前 `versionCode 185` / `versionName 'B3'`）；设置页"关于"读系统 `PackageInfo`，无需同步。
+- beta 阶段用 `B1`、`B2`、`B3`…；正式版回到语义化版本。
 - 发布步骤、Release Notes 模板、签名注意事项：`docs/RELEASING.md`。
 - 版本说明：`CHANGELOG.md`（分类：Added / Changed / Fixed / Performance）+ `docs/releases/<版本>.md`。
 - 不提交：`build/`、`.gradle/`、`.kotlin/`、`.cxx/`、`app/.cxx/`、`*.apk`、`构建日志.log`。
@@ -258,8 +259,8 @@ app/src/main/
 - `README.md`：功能与使用说明（面向用户）
 - `CHANGELOG.md`：变更历史
 - `docs/RELEASING.md`：发版流程
-- `docs/releases/B2.md`：当前版本发布说明（`B1.md` 保留为历史）
-- 仓库地址：<https://github.com/WIheee/NEW-TUB_GD>（同时用于「关于」跳转与公告拉取）
+- `docs/releases/B3.md`：当前版本发布说明（`B1.md` 保留为历史）
+- 仓库地址：<https://github.com/WIheee/Code-pr>（同时用于「关于」跳转与公告拉取）
 - `Announcement.md`：公告数据源与格式说明
 
 ---

@@ -1,4 +1,4 @@
-package com.godot.tub.gd.ui.screens
+package com.wihee.code.pr.ui.screens
 
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -25,7 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.godot.tub.gd.ExportResult
+import com.wihee.code.pr.ExportResult
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
@@ -133,7 +133,7 @@ fun HomeScreen(
             BrandMark(size = 32, corner = 11, fontSize = 12)
             Spacer(modifier = Modifier.width(10.dp))
             Text(
-                "TUB_GD",
+                "Code PR",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onBackground
             )

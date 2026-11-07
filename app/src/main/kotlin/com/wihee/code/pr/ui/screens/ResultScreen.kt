@@ -1,4 +1,4 @@
-package com.godot.tub.gd.ui.screens
+package com.wihee.code.pr.ui.screens
 
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -24,7 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import com.godot.tub.gd.ExportResult
+import com.wihee.code.pr.ExportResult
 import java.io.File
 
 @Composable

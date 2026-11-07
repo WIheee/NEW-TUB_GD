@@ -1,4 +1,4 @@
-package com.godot.tub.gd.utils
+package com.wihee.code.pr.utils
 
 import java.io.File
 
@@ -9,7 +9,7 @@ import java.io.File
 object NativeScanner {
 
     private val libraryLoaded: Boolean by lazy {
-        runCatching { System.loadLibrary("tubgd") }.isSuccess
+        runCatching { System.loadLibrary("codepr") }.isSuccess
     }
 
     private external fun nativeListRelativePaths(

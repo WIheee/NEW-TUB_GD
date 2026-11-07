@@ -1,4 +1,4 @@
-package com.godot.tub.gd
+package com.wihee.code.pr
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -7,8 +7,8 @@ import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.godot.tub.gd.utils.AnnouncementUtils
-import com.godot.tub.gd.utils.SourceMergeUtils
+import com.wihee.code.pr.utils.AnnouncementUtils
+import com.wihee.code.pr.utils.SourceMergeUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +19,7 @@ import java.io.File
 
 data class SelectedFile(val uri: Uri, val name: String)
 
-/** 用户自定义提示词；内置模式（GENERAL / ADVANCED / TUB_STYLE）不在这里。 */
+/** 用户自定义提示词；内置模式（GENERAL / ADVANCED / CODE_PR_STYLE）不在这里。 */
 data class PromptTemplate(
     val id: String,
     val name: String,
@@ -71,14 +71,25 @@ class MainViewModel : ViewModel() {
 
     fun init(context: Context) {
         if (::prefs.isInitialized) return
-        prefs = context.getSharedPreferences("TUB_GD_SETTINGS", Context.MODE_PRIVATE)
+        prefs = context.getSharedPreferences("CODE_PR_SETTINGS", Context.MODE_PRIVATE)
         historyFile = File(context.filesDir, "history.json")
         
-        val softStr = prefs.getString("softExcludeRules", "") ?: ""
-        val softRules = if (softStr.isBlank()) emptySet() else softStr.split(",").toSet()
-        
-        val hardStr = prefs.getString("hardExcludeRules", "") ?: ""
-        val hardRules = if (hardStr.isBlank()) emptySet() else hardStr.split(",").toSet()
+        fun parseRuleSet(raw: String?): Set<String> =
+            raw?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet() ?: emptySet()
+
+        // 首次启动把内置默认规则并入用户列表：之后它们和自定义规则一样可删除、可重新添加。
+        val defaultsSeeded = prefs.getBoolean("excludeDefaultsSeeded", false)
+        val softRules: Set<String> = parseRuleSet(prefs.getString("softExcludeRules", "")) +
+            if (defaultsSeeded) emptySet<String>() else SourceMergeUtils.DEFAULT_SOFT_EXTS
+        val hardRules: Set<String> = parseRuleSet(prefs.getString("hardExcludeRules", "")) +
+            if (defaultsSeeded) emptySet<String>() else SourceMergeUtils.DEFAULT_HARD_DIRS.map { "$it/" }
+        if (!defaultsSeeded) {
+            prefs.edit()
+                .putString("softExcludeRules", softRules.joinToString(","))
+                .putString("hardExcludeRules", hardRules.joinToString(","))
+                .putBoolean("excludeDefaultsSeeded", true)
+                .apply()
+        }
         
         val savedPath = prefs.getString("outputPath", null)
         val finalPath = if (savedPath.isNullOrBlank()) "/storage/emulated/0/Documents/" else savedPath
@@ -88,13 +99,20 @@ class MainViewModel : ViewModel() {
             savedMode = "DIR_ONLY"
             prefs.edit().putString("exportMode", "DIR_ONLY").apply()
         }
+
+        // 旧版本的提示词模式 id 随品牌更名迁移
+        var savedPromptMode = prefs.getString("promptMode", "GENERAL") ?: "GENERAL"
+        if (savedPromptMode == "TUB_STYLE") {
+            savedPromptMode = "CODE_PR_STYLE"
+            prefs.edit().putString("promptMode", "CODE_PR_STYLE").apply()
+        }
         
         settings.value = AppSettings(
             themeMode = prefs.getInt("themeMode", 0),
             outputPath = finalPath,
             format = prefs.getString("format", "MARKDOWN") ?: "MARKDOWN",
             exportMode = savedMode,
-            promptMode = prefs.getString("promptMode", "GENERAL") ?: "GENERAL",
+            promptMode = savedPromptMode,
             softExcludeRules = softRules,
             hardExcludeRules = hardRules,
             maxFileSizeKb = prefs.getInt("maxFileSizeKb", 100),
