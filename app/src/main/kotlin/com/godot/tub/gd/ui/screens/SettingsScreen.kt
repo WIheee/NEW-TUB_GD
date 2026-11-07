@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.godot.tub.gd.AppSettings
+import com.godot.tub.gd.utils.AnnouncementUtils
 import com.godot.tub.gd.utils.SourceMergeUtils
 import kotlinx.coroutines.launch
 
@@ -719,7 +720,7 @@ fun SettingsScreen(
                     onClick = {
                         val intent = android.content.Intent(
                             android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse("https://github.com/TUB-R/TUB_GD")
+                            android.net.Uri.parse(AnnouncementUtils.REPO_URL)
                         )
                         context.startActivity(intent)
                     }

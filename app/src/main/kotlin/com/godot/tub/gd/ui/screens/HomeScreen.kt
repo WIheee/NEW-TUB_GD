@@ -39,7 +39,8 @@ fun HomeScreen(
     onFolderSelected: (Uri) -> Unit,
     onNavigateToMultiFile: () -> Unit,
     onHistoryItemClick: (ExportResult) -> Unit,
-    onClearHistory: () -> Unit
+    onClearHistory: () -> Unit,
+    onAnnouncementsClick: () -> Unit
 ) {
     var showHistoryDialog by remember { mutableStateOf(false) }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
@@ -137,6 +138,13 @@ fun HomeScreen(
                 color = MaterialTheme.colorScheme.onBackground
             )
             Spacer(modifier = Modifier.weight(1f))
+            IconButton(onClick = onAnnouncementsClick) {
+                Icon(
+                    Icons.Default.Campaign,
+                    contentDescription = "公告",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             IconButton(onClick = { showHistoryDialog = true }) {
                 Icon(
                     Icons.Default.History,

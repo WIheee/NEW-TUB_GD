@@ -40,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
+import com.godot.tub.gd.ui.screens.AnnouncementDialog
 import com.godot.tub.gd.ui.screens.ExpressiveLoadingOverlay
 import com.godot.tub.gd.ui.screens.ExpressiveTabBar
 import com.godot.tub.gd.ui.screens.HomeScreen
@@ -70,6 +71,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val context = LocalContext.current
+            val currentVersion = remember {
+                runCatching {
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                }.getOrNull().orEmpty()
+            }
             LaunchedEffect(Unit) {
                 viewModel.errorMessage.collect { msg ->
                     android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
@@ -85,6 +91,8 @@ class MainActivity : ComponentActivity() {
 
             var showVersionWarning by remember { mutableStateOf(false) }
             val result by viewModel.result.collectAsState()
+            val showAnnouncements by viewModel.announcementDialogVisible.collectAsState()
+            val pendingAnnouncements by viewModel.pendingAnnouncements.collectAsState()
 
             LaunchedEffect(result) {
                 if (result != null && result?.godotVersion == "Unknown") {
@@ -99,6 +107,14 @@ class MainActivity : ComponentActivity() {
                     val isLoading by viewModel.isLoading.collectAsState()
                     if (isLoading) {
                         ExpressiveLoadingOverlay()
+                    }
+
+                    if (showAnnouncements && pendingAnnouncements.isNotEmpty()) {
+                        AnnouncementDialog(
+                            announcements = pendingAnnouncements,
+                            currentVersion = currentVersion,
+                            onDismiss = { viewModel.dismissAnnouncements() }
+                        )
                     }
 
                     if (showVersionWarning) {
@@ -172,7 +188,8 @@ fun AppNavigation(viewModel: MainViewModel) {
                         onFolderSelected = { uri -> viewModel.generateFromTreeUri(context, uri) },
                         onNavigateToMultiFile = { viewModel.currentScreen.value = "multi_files" },
                         onHistoryItemClick = { item -> viewModel.viewHistoryItem(item) },
-                        onClearHistory = { viewModel.clearHistory() }
+                        onClearHistory = { viewModel.clearHistory() },
+                        onAnnouncementsClick = { viewModel.refreshAnnouncements(silent = false) }
                     )
                     "multi_files" -> MultiFileScreen(
                         pendingFiles = viewModel.pendingMultiFiles.collectAsState().value,

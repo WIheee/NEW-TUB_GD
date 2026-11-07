@@ -7,6 +7,7 @@ import android.provider.OpenableColumns
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.godot.tub.gd.utils.AnnouncementUtils
 import com.godot.tub.gd.utils.SourceMergeUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -51,7 +52,13 @@ class MainViewModel : ViewModel() {
     val historyList = MutableStateFlow<List<ExportResult>>(emptyList())
     val pendingMultiFiles = MutableStateFlow<List<SelectedFile>>(emptyList())
     val isLoading = MutableStateFlow(false)
-    
+
+    val announcements = MutableStateFlow<List<AnnouncementUtils.Announcement>>(emptyList())
+    val pendingAnnouncements = MutableStateFlow<List<AnnouncementUtils.Announcement>>(emptyList())
+    val announcementDialogVisible = MutableStateFlow(false)
+
+    private var lastSeenAnnouncementId = 0
+
     val errorMessage = MutableSharedFlow<String>()
 
     fun init(context: Context) {
@@ -87,8 +94,45 @@ class MainViewModel : ViewModel() {
             streamOutput = prefs.getBoolean("streamOutput", true),
             zeroCopy = prefs.getBoolean("zeroCopy", true)
         )
+        lastSeenAnnouncementId = prefs.getInt("lastAnnouncementId", 0)
+
         // 历史记录放到后台读取，避免启动时主线程解析大 JSON
         viewModelScope.launch(Dispatchers.IO) { loadHistory() }
+
+        // 启动时静默检查公告：只有出现更新的 ID 才会弹窗
+        refreshAnnouncements(silent = true)
+    }
+
+    /**
+     * 拉取远程公告。
+     * @param silent true = 启动时静默检查（无网络/无更新都不打扰用户）；false = 用户手动点开。
+     */
+    fun refreshAnnouncements(silent: Boolean = false) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val fetched = AnnouncementUtils.fetch()
+            if (fetched.isEmpty()) {
+                if (!silent) errorMessage.emit("公告获取失败，请检查网络后重试")
+                return@launch
+            }
+            announcements.value = fetched
+
+            val unread = fetched.filter { it.id > lastSeenAnnouncementId }
+            if (unread.isEmpty() && silent) return@launch
+
+            pendingAnnouncements.value = if (unread.isNotEmpty()) unread else fetched.take(1)
+            announcementDialogVisible.value = true
+        }
+    }
+
+    /** 关闭公告并把本机已读 ID 推到远程最大值，避免重复打扰。 */
+    fun dismissAnnouncements() {
+        announcementDialogVisible.value = false
+        val maxId = announcements.value.maxOfOrNull { it.id } ?: return
+        if (maxId <= lastSeenAnnouncementId) return
+        lastSeenAnnouncementId = maxId
+        if (::prefs.isInitialized) {
+            prefs.edit().putInt("lastAnnouncementId", maxId).apply()
+        }
     }
 
     fun updateSettings(update: (AppSettings) -> AppSettings) {

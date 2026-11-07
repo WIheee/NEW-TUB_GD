@@ -55,6 +55,13 @@
 - 全英文、无 emoji，按 Godot 4.4 / 4.6 / 4.7 注入差异化红线（`.uid`、`unique_id`、Jolt、`is_class`、`RichTextLabel`、`PackedArray`、类型化返回值）
 - TUB 模式强制输出可一键运行的 Python 补丁脚本
 
+### 公告与升级提示
+
+- 公告数据源是仓库根目录的 [Announcement.md](Announcement.md)，改文件提交到 `main` 即生效，不用发版
+- 每个公告有单调递增的 ID；应用只在远程 ID 大于本机已读 ID 时弹窗，其余时候完全静默
+- `action: update` 的公告会显示「前往更新」，跳转 GitHub Releases
+- 首页右上角喇叭图标可随时手动查看
+
 ### 界面
 
 Material 3 Expressive 风格：底部悬浮 `NavigationBar`、`SegmentedButton`、动态取色（Android 12+）、纯色主题、页面与列表动效。
@@ -93,7 +100,7 @@ Material 3 Expressive 风格：底部悬浮 `NavigationBar`、`SegmentedButton`�
 | CMake | 4.1.2 |
 
 ```bash
-git clone https://github.com/TUB-R/TUB_GD.git
+git clone https://github.com/WIheee/NEW-TUB_GD.git
 cd TUB_GD
 ./gradlew :app:assembleDebug
 ```
@@ -118,6 +125,8 @@ app/src/main/cpp/            # C++ 多线程遍历
 
 ## 文档
 
+- [AGENTS.md](AGENTS.md)：给 AI 编码代理的项目说明、架构地图与改动约定
+- [Announcement.md](Announcement.md)：应用内公告数据源（格式说明见文件顶部）
 - [CHANGELOG.md](CHANGELOG.md)：版本变更
 - [docs/RELEASING.md](docs/RELEASING.md)：发版流程与 Release Notes 模板
 - [docs/releases/B1.md](docs/releases/B1.md)：当前版本发布说明

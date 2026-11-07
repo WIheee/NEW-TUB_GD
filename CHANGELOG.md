@@ -2,6 +2,19 @@
 
 本项目从 B1 起采用「版本号 + 变更分类」记录；更早版本为回溯整理。
 
+## [未发布]
+
+### Added
+
+- **公告系统**：应用启动时静默拉取仓库根目录的 `Announcement.md`，公告 ID 大于本机已读 ID 时弹窗展示；`action: update` 的公告提供「前往更新」按钮，跳转 GitHub Releases
+- 首页右上角新增公告入口（喇叭图标），可随时手动查看
+- `Announcement.md`：公告数据源，含格式说明与模板，提交到 `main` 即生效
+
+### Changed
+
+- 「关于」中的仓库地址统一为 `https://github.com/WIheee/NEW-TUB_GD`
+- 新增 `INTERNET` 权限（仅用于拉取公告）
+
 ## [B1] - 2026-11-07
 
 首个公开 beta。重点是把扫描、导出和界面整体重做了一遍。
